@@ -11,6 +11,11 @@ import java.io.*;
 import java.net.Socket;
 import java.util.Map;
 
+/**
+ * Handles a single client connection, processing authentication,
+ * chat messages, and history requests.
+ * Runs in its own thread.
+ */
 public class ClientHandler implements Runnable {
     private final Socket socket;
     private final Map<String, ClientHandler> onlineUsers;
@@ -24,7 +29,11 @@ public class ClientHandler implements Runnable {
     }
 
     @Override
-    public void run() {
+    /**
+ * Main execution loop: reads client requests, processes authentication,
+ * then handles chat messages and history queries.
+ */
+public void run() {
         try {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
             out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
@@ -88,7 +97,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void handleRegister(String user, String pass) {
+    /**
+ * Handles a REGISTER request: creates a new user record if the username is not taken.
+ *
+ * @param user the requested username
+ * @param pass the plaintext password (will be hashed before storing)
+ */
+private void handleRegister(String user, String pass) {
         Session session = HibernateUtil.getSessionFactory().openSession();
         Transaction tx = null;
         try {
@@ -115,7 +130,14 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private boolean handleLogin(String user, String pass) {
+    /**
+ * Handles a LOGIN request: verifies credentials and checks if the user is already online.
+ *
+ * @param user the username
+ * @param pass the plaintext password
+ * @return true if login succeeds, false otherwise
+ */
+private boolean handleLogin(String user, String pass) {
         Session session = HibernateUtil.getSessionFactory().openSession();
         try {
             User dbUser = session.createQuery("from User where username = :u", User.class)
@@ -137,7 +159,14 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void handleChatMessage(String toUser, String type, String payload) {
+    /**
+ * Persists a chat message to the database and forwards it to the intended recipient if they are online.
+ *
+ * @param toUser   recipient username
+ * @param type     message type (TEXT, IMAGE, VIDEO, FILE)
+ * @param payload  raw payload (for files: fileName|Base64Data)
+ */
+private void handleChatMessage(String toUser, String type, String payload) {
         String dbContent = payload;
         String fileName = null;
 
@@ -228,7 +257,10 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void broadcastUserList() {
+    /**
+ * Sends the current online user list to all connected clients.
+ */
+private void broadcastUserList() {
         String listStr = "USER_LIST|" + String.join(",", onlineUsers.keySet());
         for (ClientHandler handler : onlineUsers.values()) {
             handler.out.println(listStr);
@@ -236,7 +268,10 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void closeConnection() {
+    /**
+ * Closes the client socket and removes the user from the online list.
+ */
+private void closeConnection() {
         if (username != null) {
             onlineUsers.remove(username);
             broadcastUserList();

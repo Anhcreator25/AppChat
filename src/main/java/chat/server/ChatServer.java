@@ -8,8 +8,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Máy chủ trung tâm quản lý kết nối Socket TCP.
- * Sử dụng cơ chế Multi-Thread để xử lý đồng thời nhiều Client cùng lúc.
+ * Main server that accepts TCP socket connections from chat clients.
+ * Utilizes a multi‑threaded model to handle multiple concurrent clients.
  */
 public class ChatServer {
     private static final int PORT = 12345;

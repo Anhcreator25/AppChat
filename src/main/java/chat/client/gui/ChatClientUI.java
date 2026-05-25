@@ -15,16 +15,22 @@ import java.nio.file.StandardOpenOption;
 import java.util.Base64;
 import java.io.File;
 
+/**
+ * Main UI window for the chat client.
+ * Displays a list of contacts on the left and the conversation panel on the right.
+ * Handles user interactions (sending messages, attaching files, emoji selection)
+ * and forwards network actions to {@link ChatClientCore}.
+ */
 public class ChatClientUI extends JFrame {
-    private final String myUsername;
-    private final ChatClientCore core;
-    private String currentSelectedUser = null;
+    private final String myUsername; // Username of the logged‑in user
+    private final ChatClientCore core; // Core responsible for network communication
+    private String currentSelectedUser = null; // Currently selected chat partner (null when none)
     // Pagination state for chat history
-    private int historyOffset = 0;
-    private static final int PAGE_SIZE = 30;
-    private int receivedHistoryCount = 0;
-    private boolean loadingHistory = false;
-    private boolean allHistoryLoaded = false;
+    private int historyOffset = 0; // Offset for paginated history loading
+    private static final int PAGE_SIZE = 30; // Number of messages per page when loading history
+    private int receivedHistoryCount = 0; // Counter for messages received in the current page
+    private boolean loadingHistory = false; // Flag indicating a history request is in progress
+    private boolean allHistoryLoaded = false; // True when the entire chat history has been retrieved
 
     private DefaultListModel<String> onlineListModel;
     private JList<String> onlineJList;
@@ -37,7 +43,13 @@ public class ChatClientUI extends JFrame {
     private JButton btnAttach;
     private JButton btnEmoji;
 
-    public ChatClientUI(String myUsername, ChatClientCore core) {
+    /**
+ * Constructs the main chat window for a logged‑in user.
+ *
+ * @param myUsername the username of the logged‑in user
+ * @param core       the network core used to send/receive messages
+ */
+public ChatClientUI(String myUsername, ChatClientCore core) {
         this.myUsername = myUsername;
         this.core = core;
 
@@ -246,7 +258,11 @@ public class ChatClientUI extends JFrame {
         return btn;
     }
 
-    private void performSendMessage() {
+    /**
+ * Sends the text currently typed in the input field to the selected user.
+ * Validates that a user is selected and the message is non‑empty.
+ */
+private void performSendMessage() {
         String msg = txtInput.getText().trim();
         if (msg.isEmpty()) return;
 
@@ -262,7 +278,12 @@ public class ChatClientUI extends JFrame {
         txtInput.requestFocus();
     }
 
-    private void handleFileAttach() {
+    /**
+ * Opens a file chooser, determines the file type, reads the file bytes,
+ * and sends the file/message to the selected user via {@link ChatClientCore}.
+ * Also updates the UI with a preview (image or file bubble).
+ */
+private void handleFileAttach() {
         if (currentSelectedUser == null) {
             JOptionPane.showMessageDialog(this, "Vui lòng chọn một người để gửi tệp!");
             return;
@@ -299,7 +320,11 @@ public class ChatClientUI extends JFrame {
         }
     }
 
-    private void handleEmojiSelect() {
+    /**
+ * Shows a simple dialog with a list of emojis.
+ * When an emoji is selected, sends it as an ICON message and displays it in the chat.
+ */
+private void handleEmojiSelect() {
         if (currentSelectedUser == null) {
             JOptionPane.showMessageDialog(this, "Vui lòng chọn một người để gửi biểu tượng!");
             return;
@@ -320,7 +345,11 @@ public class ChatClientUI extends JFrame {
         }
     }
 
-    private void setupNetworkListeners() {
+    /**
+ * Registers all network event listeners with {@link ChatClientCore}.
+ * Listeners update the UI when contacts, private messages, or history data arrive.
+ */
+private void setupNetworkListeners() {
         core.addContactsListener(users -> SwingUtilities.invokeLater(() -> {
             onlineListModel.clear();
             for (String user : users) {
@@ -370,7 +399,13 @@ core.addHistoryDoneListener(withUser -> SwingUtilities.invokeLater(() -> {
             }));
     }
 
-    private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) {
+    /**
+ * Parses a formatted message received from the server and forwards it to the appropriate UI element.
+ *
+ * @param formattedMsg the raw message string (may contain prefixes for images, files, video)
+ * @param isMe         true if the sender is the local user, false otherwise
+ */
+private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) {
         if (formattedMsg.startsWith("[IMAGE]:")) {
             String payload = formattedMsg.substring("[IMAGE]:".length());
             int sepIdx = payload.indexOf('|');
@@ -399,7 +434,13 @@ core.addHistoryDoneListener(withUser -> SwingUtilities.invokeLater(() -> {
         }
     }
 
-    private void appendChatBubble(String text, boolean isMe) {
+    /**
+ * Adds a text bubble to the chat area.
+ *
+ * @param text the message text to display
+ * @param isMe true if the message was sent by the local user (right‑aligned)
+ */
+private void appendChatBubble(String text, boolean isMe) {
         Box row = Box.createHorizontalBox();
 
         JTextArea bubbleArea = new JTextArea(text);
@@ -449,7 +490,14 @@ core.addHistoryDoneListener(withUser -> SwingUtilities.invokeLater(() -> {
         });
     }
 
-    private void appendImageBubble(ImageIcon icon, boolean isMe) {
+    /**
+ * Adds an image bubble to the chat area.
+ * The image is scaled down if it exceeds a maximum width.
+ *
+ * @param icon  the image to display
+ * @param isMe  true if the image was sent by the local user (right‑aligned)
+ */
+private void appendImageBubble(ImageIcon icon, boolean isMe) {
         int maxWidth = 320;
         if (icon.getIconWidth() > maxWidth) {
             Image scaled = icon.getImage().getScaledInstance(maxWidth, -1, Image.SCALE_SMOOTH);
@@ -498,7 +546,15 @@ core.addHistoryDoneListener(withUser -> SwingUtilities.invokeLater(() -> {
     // =========================================================================
     // 4. BONG BÓNG HIỂN THỊ FILE CHUẨN ZALO (NHƯ ẢNH MINH HỌA)
     // =========================================================================
-    private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
+    /**
+ * Creates a file bubble that mimics Zalo's file preview UI.
+ * The file bytes are written to a temporary file for preview/download actions.
+ *
+ * @param fileName the original file name (used for icon selection and display)
+ * @param data     the raw file data (Base64‑decoded)
+ * @param isMe     true if the file was sent by the local user (right‑aligned)
+ */
+private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
         try {
             // Khởi tạo file tạm thời lưu trữ ngầm
             File tempFile = File.createTempFile("zalo_file_", "_" + fileName);
