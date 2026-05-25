@@ -4,120 +4,247 @@ import chat.client.network.ChatClientCore;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.Toolkit;
 import java.awt.event.KeyAdapter;
-import java.awt.event.AdjustmentListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Ellipse2D;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Base64;
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
-/**
- * Main UI window for the chat client.
- * Displays a list of contacts on the left and the conversation panel on the right.
- * Handles user interactions (sending messages, attaching files, emoji selection)
- * and forwards network actions to {@link ChatClientCore}.
- */
 public class ChatClientUI extends JFrame {
-    private final String myUsername; // Username of the logged‑in user
-    private final ChatClientCore core; // Core responsible for network communication
-    private String currentSelectedUser = null; // Currently selected chat partner (null when none)
-    // Pagination state for chat history
-    private int historyOffset = 0; // Offset for paginated history loading
-    private static final int PAGE_SIZE = 30; // Number of messages per page when loading history
-    private int receivedHistoryCount = 0; // Counter for messages received in the current page
-    private boolean loadingHistory = false; // Flag indicating a history request is in progress
-    private boolean allHistoryLoaded = false; // True when the entire chat history has been retrieved
+    private final String myUsername;
+    private final ChatClientCore core;
+    private String currentSelectedUser = null;
 
-    private DefaultListModel<String> onlineListModel;
-    private JList<String> onlineJList;
+    // Phân trang lịch sử chat
+    private int historyOffset = 0;
+    private static final int PAGE_SIZE = 30;
+    private int receivedHistoryCount = 0;
+    private boolean loadingHistory = false;
+    private boolean allHistoryLoaded = false;
+
+    // Sử dụng Model đối tượng tùy biến thay vì String đơn thuần
+    private DefaultListModel<ContactItem> onlineListModel;
+    private JList<ContactItem> onlineJList;
+    private final Map<String, ContactItem> contactsMap = new HashMap<>();
 
     private JLabel lblChatHeader;
     private JPanel chatBoxContainer;
     private JScrollPane chatScrollPane;
-    private JTextField txtInput;
+    private JTextArea txtInput;
     private JButton btnSend;
     private JButton btnAttach;
     private JButton btnEmoji;
 
-    /**
- * Constructs the main chat window for a logged‑in user.
- *
- * @param myUsername the username of the logged‑in user
- * @param core       the network core used to send/receive messages
- */
-public ChatClientUI(String myUsername, ChatClientCore core) {
+    // --- BẢNG MÀU MESSENGER PREMIUM ---
+    private static final Color PRIMARY_BLUE = new Color(0, 132, 255);
+    private static final Color BACKGROUND_LEFT = Color.WHITE;
+    private static final Color BACKGROUND_RIGHT = new Color(240, 242, 245);
+    private static final Color TEXT_MAIN = new Color(5, 5, 5);
+    private static final Color TEXT_MUTED = new Color(101, 103, 107);
+    private static final Color BUBBLE_ME = new Color(212, 230, 255);
+    private static final Color BORDER_COLOR = new Color(240, 240, 240);
+    private static final Color SEARCH_BG = new Color(240, 242, 245);
+
+    // Kích thước tối đa cho bubble tin nhắn văn bản (Đo lường theo CM sang Pixel hợp lý)
+    private static final int TEXT_BUBBLE_MAX_WIDTH_CM = 12;
+    private static final int TEXT_BUBBLE_MAX_WIDTH_PX =
+            (int) Math.round(TEXT_BUBBLE_MAX_WIDTH_CM *
+                    Toolkit.getDefaultToolkit().getScreenResolution() / 2.54);
+
+
+    // Lớp chứa dữ liệu cho một dòng liên hệ (Đầy đủ thuộc tính như ảnh mẫu)
+    public static class ContactItem {
+        String username;
+        String lastMessage;
+        String timeAgo;
+        boolean isOnline;
+
+        public ContactItem(String username, String lastMessage, String timeAgo, boolean isOnline) {
+            this.username = username;
+            this.lastMessage = lastMessage;
+            this.timeAgo = timeAgo;
+            this.isOnline = isOnline;
+        }
+    }
+
+    public ChatClientUI(String myUsername, ChatClientCore core) {
         this.myUsername = myUsername;
         this.core = core;
 
         setupNetworkListeners();
 
-        setTitle("Zalo Chat - " + myUsername);
-        setSize(950, 650);
+        setTitle("Messenger - " + myUsername);
+        setSize(1050, 750);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
         // =========================================================================
-        // 1. Page list friend
+        // 1. SIDEBAR BÊN TRÁI (THIẾT KẾ CHUẨN MESSENGER)
         // =========================================================================
         JPanel leftPanel = new JPanel(new BorderLayout());
-        leftPanel.setPreferredSize(new Dimension(280, 650));
-        leftPanel.setBackground(Color.WHITE);
-        leftPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(225, 230, 235)));
+        leftPanel.setPreferredSize(new Dimension(340, 750));
+        leftPanel.setBackground(BACKGROUND_LEFT);
+        leftPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_COLOR));
 
-        JPanel leftHeader = new JPanel(new BorderLayout());
-        leftHeader.setBackground(new Color(0, 145, 255));
-        leftHeader.setBorder(new EmptyBorder(0, 18, 0, 18));
-        leftHeader.setPreferredSize(new Dimension(280, 60));
+        // KHU VỰC HEADER SIDEBAR (Tên góc, Nút chức năng, Tìm kiếm, Tab phân loại)
+        JPanel leftHeaderContainer = new JPanel();
+        leftHeaderContainer.setLayout(new BoxLayout(leftHeaderContainer, BoxLayout.Y_AXIS));
+        leftHeaderContainer.setBackground(BACKGROUND_LEFT);
+        leftHeaderContainer.setBorder(new EmptyBorder(15, 16, 10, 16));
 
-        JLabel lblMyName = new JLabel(myUsername.toUpperCase(), JLabel.LEFT);
-        lblMyName.setFont(new Font("Segoe UI", Font.BOLD, 16));
-        lblMyName.setForeground(Color.WHITE);
-        leftHeader.add(lblMyName, BorderLayout.CENTER);
-        leftPanel.add(leftHeader, BorderLayout.NORTH);
+        // Hàng 1: Chữ "Đoạn chat" và các nút góc phải
+        JPanel titleRow = new JPanel(new BorderLayout());
+        titleRow.setBackground(BACKGROUND_LEFT);
+        JLabel lblSidebarTitle = new JLabel("Đoạn chat");
+        lblSidebarTitle.setFont(new Font("Segoe UI", Font.BOLD, 24));
+        lblSidebarTitle.setForeground(TEXT_MAIN);
+        titleRow.add(lblSidebarTitle, BorderLayout.WEST);
 
+        // Cụm icon chức năng tròn (Menu, Viết tin mới)
+        JPanel iconActionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        iconActionPanel.setBackground(BACKGROUND_LEFT);
+        iconActionPanel.add(createCircleActionButton("•••"));
+        iconActionPanel.add(createCircleActionButton("📝"));
+        titleRow.add(iconActionPanel, BorderLayout.EAST);
+        leftHeaderContainer.add(titleRow);
+        leftHeaderContainer.add(Box.createVerticalStrut(12));
+
+        // Hàng 2: Thanh tìm kiếm bo tròn (Search Bar)
+        JTextField txtSearch = new JTextField("Tìm kiếm trên Messenger");
+        txtSearch.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        txtSearch.setForeground(TEXT_MUTED);
+        txtSearch.setBorder(null);
+        txtSearch.setOpaque(false);
+
+        JPanel searchWrapper = new JPanel(new BorderLayout(8, 0)) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(SEARCH_BG);
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
+                g2d.dispose();
+            }
+        };
+        searchWrapper.setOpaque(false);
+        searchWrapper.setBorder(new EmptyBorder(8, 12, 8, 12));
+
+        JLabel lblSearchIcon = new JLabel("🔍");
+        lblSearchIcon.setForeground(TEXT_MUTED);
+        searchWrapper.add(lblSearchIcon, BorderLayout.WEST);
+        searchWrapper.add(txtSearch, BorderLayout.CENTER);
+        leftHeaderContainer.add(searchWrapper);
+        leftHeaderContainer.add(Box.createVerticalStrut(12));
+
+        // Hàng 3: Các Tab phân loại (Tất cả, Chưa đọc, Nhóm)
+        JPanel tabRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        tabRow.setBackground(BACKGROUND_LEFT);
+        tabRow.add(createPillTabButton("Tất cả", true));
+        tabRow.add(createPillTabButton("Chưa đọc", false));
+        tabRow.add(createPillTabButton("Nhóm", false));
+        leftHeaderContainer.add(tabRow);
+        leftHeaderContainer.add(Box.createVerticalStrut(10));
+
+        leftPanel.add(leftHeaderContainer, BorderLayout.NORTH);
+
+        // DANH SÁCH CHAT SỬ DỤNG CELL RENDERER ĐỂ VẼ AVATAR TRÒN VÀ TIN NHẮN PHỤ
         onlineListModel = new DefaultListModel<>();
         onlineJList = new JList<>(onlineListModel);
-        onlineJList.setFont(new Font("Segoe UI", Font.PLAIN, 15));
         onlineJList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        onlineJList.setFixedCellHeight(60);
-        onlineJList.setBackground(Color.WHITE);
-        onlineJList.setSelectionBackground(new Color(234, 245, 255));
-        onlineJList.setSelectionForeground(new Color(0, 120, 242));
+        onlineJList.setFixedCellHeight(72);
+        onlineJList.setBackground(BACKGROUND_LEFT);
+        onlineJList.setSelectionBackground(new Color(242, 244, 247));
+        onlineJList.setSelectionForeground(TEXT_MAIN);
 
-        onlineJList.setCellRenderer(new DefaultListCellRenderer() {
+        onlineJList.setCellRenderer(new ListCellRenderer<ContactItem>() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                label.setBorder(new EmptyBorder(0, 20, 0, 0));
-                label.setText("💬  " + value.toString());
-                return label;
+            public Component getListCellRendererComponent(JList<? extends ContactItem> list, ContactItem value, int index, boolean isSelected, boolean cellHasFocus) {
+                JPanel itemPanel = new JPanel(new BorderLayout(12, 0));
+                itemPanel.setOpaque(true);
+                itemPanel.setBackground(isSelected ? new Color(242, 244, 247) : BACKGROUND_LEFT);
+                itemPanel.setBorder(new EmptyBorder(0, 16, 0, 16));
+
+                // Khối vẽ Avatar tròn có chấm xanh trạng thái sát viền (Góc trái)
+                JPanel avatarBlock = new JPanel() {
+                    @Override
+                    protected void paintComponent(Graphics g) {
+                        super.paintComponent(g);
+                        Graphics2D g2d = (Graphics2D) g.create();
+                        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                        g2d.setColor(new Color(225, 227, 230));
+                        g2d.fill(new Ellipse2D.Double(0, 4, 44, 44));
+
+                        g2d.setColor(TEXT_MUTED);
+                        g2d.setFont(new Font("Segoe UI", Font.BOLD, 16));
+                        String initial = (value.username == null || value.username.isEmpty()) ? "?" : value.username.substring(0, 1).toUpperCase();
+                        FontMetrics fm = g2d.getFontMetrics();
+                        int textX = (44 - fm.stringWidth(initial)) / 2;
+                        int textY = ((44 - fm.getHeight()) / 2) + fm.getAscent() + 4;
+                        g2d.drawString(initial, textX, textY);
+
+                        if (value.isOnline) {
+                            g2d.setColor(Color.WHITE);
+                            g2d.fill(new Ellipse2D.Double(30, 34, 15, 15));
+                            g2d.setColor(new Color(49, 162, 76));
+                            g2d.fill(new Ellipse2D.Double(32, 36, 11, 11));
+                        }
+                        g2d.dispose();
+                    }
+                };
+                avatarBlock.setOpaque(false);
+                avatarBlock.setPreferredSize(new Dimension(46, 52));
+                itemPanel.add(avatarBlock, BorderLayout.WEST);
+
+                // Khối hiển thị văn bản (Tên, nội dung chat, thời gian) ở trung tâm
+                JPanel centerTextPanel = new JPanel();
+                centerTextPanel.setLayout(new BoxLayout(centerTextPanel, BoxLayout.Y_AXIS));
+                centerTextPanel.setOpaque(false);
+                centerTextPanel.add(Box.createVerticalStrut(14));
+
+                JLabel lblName = new JLabel(value.username);
+                lblName.setFont(new Font("Segoe UI", Font.BOLD, 15));
+                lblName.setForeground(TEXT_MAIN);
+                centerTextPanel.add(lblName);
+                centerTextPanel.add(Box.createVerticalStrut(2));
+
+                JLabel lblSub = new JLabel(value.lastMessage + "  ·  " + value.timeAgo);
+                lblSub.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+                lblSub.setForeground(TEXT_MUTED);
+                centerTextPanel.add(lblSub);
+
+                itemPanel.add(centerTextPanel, BorderLayout.CENTER);
+                return itemPanel;
             }
         });
 
         onlineJList.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
-                String selected = onlineJList.getSelectedValue();
-                if (selected != null && !selected.equals(currentSelectedUser)) {
-                    currentSelectedUser = selected;
+                ContactItem selectedItem = onlineJList.getSelectedValue();
+                if (selectedItem != null && !selectedItem.username.equals(currentSelectedUser)) {
+                    currentSelectedUser = selectedItem.username;
                     lblChatHeader.setText("👤  " + currentSelectedUser);
 
                     chatBoxContainer.removeAll();
                     chatBoxContainer.revalidate();
                     chatBoxContainer.repaint();
 
-                    System.out.println("[UI LOG] Đang yêu cầu tải lịch sử chat với: " + currentSelectedUser);
-                    // Reset pagination state
-            historyOffset = 0;
-            receivedHistoryCount = 0;
-            allHistoryLoaded = false;
-            loadingHistory = true;
-            // Yêu cầu trang đầu (các tin cũ nhất)
-            core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
+                    historyOffset = 0;
+                    receivedHistoryCount = 0;
+                    allHistoryLoaded = false;
+                    loadingHistory = true;
+                    core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
                 }
             }
         });
@@ -128,87 +255,108 @@ public ChatClientUI(String myUsername, ChatClientCore core) {
         add(leftPanel, BorderLayout.WEST);
 
         // =========================================================================
-        // 2. Panel show chat
+        // 2. PANEL CHAT BÊN PHẢI (THIẾT KẾ KHUNG KHÔNG GIAN TRÒN)
         // =========================================================================
         JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBackground(new Color(238, 240, 242));
+        rightPanel.setBackground(BACKGROUND_RIGHT);
 
         JPanel rightHeader = new JPanel(new BorderLayout());
         rightHeader.setBackground(Color.WHITE);
-        rightHeader.setPreferredSize(new Dimension(670, 60));
-        rightHeader.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(225, 230, 235)));
+        rightHeader.setPreferredSize(new Dimension(710, 65));
+        rightHeader.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR));
 
-        lblChatHeader = new JLabel("Chọn một người ở danh sách bên trái để bắt đầu cuộc trò chuyện", JLabel.LEFT);
+        lblChatHeader = new JLabel("Chọn một người ở danh sách để bắt đầu trò chuyện", JLabel.LEFT);
         lblChatHeader.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        lblChatHeader.setForeground(new Color(30, 35, 40));
-        lblChatHeader.setBorder(new EmptyBorder(0, 25, 0, 0));
+        lblChatHeader.setForeground(TEXT_MAIN);
+        lblChatHeader.setBorder(new EmptyBorder(0, 24, 0, 0));
         rightHeader.add(lblChatHeader, BorderLayout.CENTER);
         rightPanel.add(rightHeader, BorderLayout.NORTH);
 
         chatBoxContainer = new JPanel();
         chatBoxContainer.setLayout(new BoxLayout(chatBoxContainer, BoxLayout.Y_AXIS));
-        chatBoxContainer.setBackground(new Color(238, 240, 242));
-        chatBoxContainer.setBorder(new EmptyBorder(20, 25, 20, 25));
+        chatBoxContainer.setBackground(BACKGROUND_RIGHT);
+        chatBoxContainer.setBorder(new EmptyBorder(24, 24, 24, 24));
 
         chatScrollPane = new JScrollPane(chatBoxContainer);
         chatScrollPane.setBorder(null);
-        chatScrollPane.getVerticalScrollBar().setUnitIncrement(20);
+        chatScrollPane.getVerticalScrollBar().setUnitIncrement(25);
         rightPanel.add(chatScrollPane, BorderLayout.CENTER);
 
         // =========================================================================
-        // 3. Panel enter
+        // 3. KHU VỰC NHẬP TIN NHẮN (BOTTOM PANEL)
         // =========================================================================
         JPanel bottomAreaPanel = new JPanel(new BorderLayout());
         bottomAreaPanel.setBackground(Color.WHITE);
-        bottomAreaPanel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(225, 230, 235)));
+        bottomAreaPanel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, BORDER_COLOR));
 
-        // Cấu trúc hàng nhập liệu chính
-        JPanel inputRowPanel = new JPanel(new BorderLayout(12, 0));
+        JPanel inputRowPanel = new JPanel(new BorderLayout(15, 0));
         inputRowPanel.setBackground(Color.WHITE);
-        inputRowPanel.setBorder(new EmptyBorder(12, 15, 12, 15));
+        inputRowPanel.setBorder(new EmptyBorder(15, 20, 15, 20));
 
-        // KHU VỰC BÊN TRÁI: Chứa nút đính kèm file và nút Emoji (Đúng ý bạn)
-        JPanel leftActionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        JPanel leftActionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         leftActionPanel.setBackground(Color.WHITE);
 
-        btnAttach = createStyledToolbarButton("\uD83D\uDCCE"); // Kẹp giấy
+        btnAttach = createStyledToolbarButton("📎");
         btnAttach.addActionListener(e -> handleFileAttach());
         leftActionPanel.add(btnAttach);
 
-        btnEmoji = createStyledToolbarButton("\uD83D\uDE00"); // Mặt cười
+        btnEmoji = createStyledToolbarButton("😀");
         btnEmoji.addActionListener(e -> handleEmojiSelect());
         leftActionPanel.add(btnEmoji);
 
         inputRowPanel.add(leftActionPanel, BorderLayout.WEST);
 
-        // KHU VỰC TRUNG TÂM: Ô nhập liệu văn bản
-        txtInput = new JTextField();
+        txtInput = new JTextArea(1, 30);
         txtInput.setFont(new Font("Segoe UI", Font.PLAIN, 15));
-        txtInput.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(215, 220, 225), 1, true),
-                new EmptyBorder(8, 10, 8, 10)
-        ));
+        txtInput.setLineWrap(true);
+        txtInput.setWrapStyleWord(true);
+        txtInput.setBorder(null);
+
+        JPanel textInputWrapper = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(SEARCH_BG);
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
+                g2d.dispose();
+            }
+        };
+        textInputWrapper.setOpaque(false);
+        textInputWrapper.setBorder(new EmptyBorder(10, 15, 10, 15));
+
+        txtInput.setOpaque(false);
+        textInputWrapper.add(txtInput, BorderLayout.CENTER);
+        inputRowPanel.add(textInputWrapper, BorderLayout.CENTER);
+
         txtInput.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+                if (e.getKeyCode() == KeyEvent.VK_ENTER && !e.isShiftDown()) {
+                    e.consume();
                     performSendMessage();
                 }
             }
         });
-        inputRowPanel.add(txtInput, BorderLayout.CENTER);
 
-        // KHU VỰC BÊN PHẢI: Nút gửi tin nhắn xanh chủ đạo
-        btnSend = new JButton("Gửi");
+        btnSend = new JButton("Gửi") {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(getBackground());
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
+                g2d.dispose();
+                super.paintComponent(g);
+            }
+        };
         btnSend.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        btnSend.setBackground(new Color(0, 145, 255));
+        btnSend.setBackground(PRIMARY_BLUE);
         btnSend.setForeground(Color.WHITE);
         btnSend.setFocusPainted(false);
+        btnSend.setContentAreaFilled(false);
         btnSend.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        btnSend.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(0, 135, 240), 1, true),
-                new EmptyBorder(0, 22, 0, 22)
-        ));
+        btnSend.setBorder(new EmptyBorder(0, 24, 0, 24));
         btnSend.addActionListener(e -> performSendMessage());
         inputRowPanel.add(btnSend, BorderLayout.EAST);
 
@@ -216,36 +364,79 @@ public ChatClientUI(String myUsername, ChatClientCore core) {
         rightPanel.add(bottomAreaPanel, BorderLayout.SOUTH);
 
         add(rightPanel, BorderLayout.CENTER);
-        core.requestContacts(); // yêu cầu danh sách liên hệ sau khi UI khởi tạo
-        // Thiết lập listener cuộn để tải thêm lịch sử khi cuộn tới cuối
+        core.requestContacts();
+
         chatScrollPane.getVerticalScrollBar().addAdjustmentListener(e -> {
             if (e.getValueIsAdjusting()) return;
             JScrollBar sb = chatScrollPane.getVerticalScrollBar();
-            int max = sb.getMaximum() - sb.getVisibleAmount(); // vị trí cuối cùng (có thể cuộn tới)
-            if (!loadingHistory && !allHistoryLoaded && sb.getValue() >= max) {
-                // Yêu cầu tải trang tiếp theo
+            int max = sb.getMaximum() - sb.getVisibleAmount();
+            if (!loadingHistory && !allHistoryLoaded && sb.getValue() >= max && currentSelectedUser != null) {
                 loadingHistory = true;
                 core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
             }
         });
     }
 
+    private JButton createCircleActionButton(String text) {
+        JButton btn = new JButton(text) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(new Color(240, 242, 245));
+                g2d.fillOval(0, 0, getWidth(), getHeight());
+                g2d.dispose();
+                super.paintComponent(g);
+            }
+        };
+        btn.setFont(new Font("Segoe UI", Font.BOLD, text.length() > 1 ? 11 : 14));
+        btn.setPreferredSize(new Dimension(36, 36));
+        btn.setContentAreaFilled(false);
+        btn.setBorderPainted(false);
+        btn.setFocusPainted(false);
+        btn.setForeground(TEXT_MAIN);
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        return btn;
+    }
+
+    private JButton createPillTabButton(String text, boolean isActive) {
+        JButton btn = new JButton(text) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(isActive ? new Color(231, 243, 255) : Color.WHITE);
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 16, 16);
+                g2d.dispose();
+                super.paintComponent(g);
+            }
+        };
+        btn.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        btn.setForeground(isActive ? PRIMARY_BLUE : TEXT_MUTED);
+        btn.setContentAreaFilled(false);
+        btn.setBorderPainted(false);
+        btn.setFocusPainted(false);
+        btn.setBorder(new EmptyBorder(6, 14, 6, 14));
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        return btn;
+    }
+
     private JButton createStyledToolbarButton(String iconText) {
         JButton btn = new JButton(iconText);
         btn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 18));
-        btn.setPreferredSize(new Dimension(38, 38));
+        btn.setPreferredSize(new Dimension(40, 40));
         btn.setContentAreaFilled(false);
         btn.setBorderPainted(false);
         btn.setFocusPainted(false);
         btn.setOpaque(false);
         btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        btn.setForeground(new Color(110, 125, 140));
+        btn.setForeground(TEXT_MUTED);
 
         btn.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
                 btn.setOpaque(true);
-                btn.setBackground(new Color(242, 244, 247));
+                btn.setBackground(SEARCH_BG);
                 btn.repaint();
             }
             @Override
@@ -259,8 +450,9 @@ public ChatClientUI(String myUsername, ChatClientCore core) {
     }
 
     /**
- * Sends the text currently typed in the input field to the selected user.
- * Validates that a user is selected and the message is non‑empty.
+ * Sends a text message entered in the input area to the currently selected chat partner.
+ * Validates that the message is not empty and that a contact is selected.
+ * After sending, the message bubble is added to the UI and the input field is cleared.
  */
 private void performSendMessage() {
         String msg = txtInput.getText().trim();
@@ -279,9 +471,9 @@ private void performSendMessage() {
     }
 
     /**
+ * Handles the attachment of a file (image, video, or generic file) to the current chat.
  * Opens a file chooser, determines the file type, reads the file bytes,
- * and sends the file/message to the selected user via {@link ChatClientCore}.
- * Also updates the UI with a preview (image or file bubble).
+ * sends it through the core, and displays an appropriate bubble (image or file).
  */
 private void handleFileAttach() {
         if (currentSelectedUser == null) {
@@ -303,7 +495,6 @@ private void handleFileAttach() {
                 type = "FILE";
             }
 
-            // Đọc dữ liệu thô gửi qua mạng
             try {
                 byte[] bytes = Files.readAllBytes(file.toPath());
                 core.sendFileMessage(currentSelectedUser, file, type);
@@ -321,8 +512,8 @@ private void handleFileAttach() {
     }
 
     /**
- * Shows a simple dialog with a list of emojis.
- * When an emoji is selected, sends it as an ICON message and displays it in the chat.
+ * Opens a dialog to let the user select an emoji from a predefined list.
+ * The chosen emoji is sent as an icon message and displayed as a text bubble.
  */
 private void handleEmojiSelect() {
         if (currentSelectedUser == null) {
@@ -331,13 +522,8 @@ private void handleEmojiSelect() {
         }
         String[] emojis = {"😀","😂","😍","👍","🎉","❤️","😎","🙏","😭","😮"};
         String selected = (String) JOptionPane.showInputDialog(
-                this,
-                "Chọn biểu tượng cảm xúc:",
-                "Zalo Emojis",
-                JOptionPane.PLAIN_MESSAGE,
-                null,
-                emojis,
-                emojis[0]
+                this, "Chọn biểu tượng cảm xúc:", "Premium Emojis",
+                JOptionPane.PLAIN_MESSAGE, null, emojis, emojis[0]
         );
         if (selected != null) {
             core.sendIconMessage(currentSelectedUser, selected);
@@ -346,19 +532,40 @@ private void handleEmojiSelect() {
     }
 
     /**
- * Registers all network event listeners with {@link ChatClientCore}.
- * Listeners update the UI when contacts, private messages, or history data arrive.
+ * Registers all network listeners with {@link ChatClientCore}.
+ *   • contactsListener – populates the contacts map with users the current user has chatted with.
+ *   • userListListener – updates online/offline status for contacts and adds newly online users.
+ *   • privateMessageListener – receives private messages and forwards them to UI.
+ *   • historyMessageListener – receives historical messages for pagination.
+ *   • historyDoneListener – marks the end of a page of history.
  */
 private void setupNetworkListeners() {
         core.addContactsListener(users -> SwingUtilities.invokeLater(() -> {
-            onlineListModel.clear();
             for (String user : users) {
-                if (!user.equals(myUsername)) {
-                    onlineListModel.addElement(user);
+                if (!user.equals(myUsername) && !contactsMap.containsKey(user)) {
+                    ContactItem ci = new ContactItem(user, "Nhấp để trò chuyện...", "1 phút", false);
+                    contactsMap.put(user, ci);
+                    onlineListModel.addElement(ci);
                 }
             }
-            onlineJList.repaint();
             onlineJList.revalidate();
+            onlineJList.repaint();
+        }));
+
+        core.addUserListListener(onlineUsers -> SwingUtilities.invokeLater(() -> {
+            Set<String> onlineSet = new HashSet<>(onlineUsers);
+            for (ContactItem ci : contactsMap.values()) {
+                ci.isOnline = onlineSet.contains(ci.username);
+            }
+            for (String user : onlineSet) {
+                if (!user.equals(myUsername) && !contactsMap.containsKey(user)) {
+                    ContactItem ci = new ContactItem(user, "Nhấp để trò chuyện...", "1 phút", true);
+                    contactsMap.put(user, ci);
+                    onlineListModel.addElement(ci);
+                }
+            }
+            onlineJList.revalidate();
+            onlineJList.repaint();
         }));
 
         core.addPrivateMessageListener((fromUser, formattedMsg) -> SwingUtilities.invokeLater(() -> {
@@ -374,36 +581,30 @@ private void setupNetworkListeners() {
         core.addHistoryMessageListener((sender, formattedMsg) -> SwingUtilities.invokeLater(() -> {
             boolean isMe = sender.equals(myUsername);
             processIncomingFormattedMessage(formattedMsg, isMe);
-            // Đếm số tin trong trang hiện tại
             receivedHistoryCount++;
         }));
 
-core.addHistoryDoneListener(withUser -> SwingUtilities.invokeLater(() -> {
-                // Khi một trang lịch sử đã được gửi xong
-                if (receivedHistoryCount < PAGE_SIZE) {
-                    // Không còn tin nào nữa
-                    allHistoryLoaded = true;
-                } else {
-                    // Có thể còn tin, tăng offset để tải trang tiếp theo khi cần
-                    historyOffset += PAGE_SIZE;
-                }
-                // Reset đếm cho trang tiếp theo
-                receivedHistoryCount = 0;
-                loadingHistory = false;
+        core.addHistoryDoneListener(withUser -> SwingUtilities.invokeLater(() -> {
+            if (receivedHistoryCount < PAGE_SIZE) {
+                allHistoryLoaded = true;
+            } else {
+                historyOffset += PAGE_SIZE;
+            }
+            receivedHistoryCount = 0;
+            loadingHistory = false;
 
-                chatBoxContainer.revalidate();
-                chatBoxContainer.repaint();
-                JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
-                // cuộn xuống cuối cùng (tin mới nhất)
-                vertical.setValue(vertical.getMaximum());
-            }));
+            chatBoxContainer.revalidate();
+            chatBoxContainer.repaint();
+            JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+            vertical.setValue(vertical.getMaximum());
+        }));
     }
 
     /**
- * Parses a formatted message received from the server and forwards it to the appropriate UI element.
- *
- * @param formattedMsg the raw message string (may contain prefixes for images, files, video)
- * @param isMe         true if the sender is the local user, false otherwise
+ * Parses a formatted message received from the server and routes it to the appropriate UI bubble.
+ * Supported prefixes: [IMAGE]:, [FILE]:, [VIDEO]:. Other messages are treated as plain text.
+ * @param formattedMsg The message payload from the server.
+ * @param isMe         True if the message originates from the current user.
  */
 private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) {
         if (formattedMsg.startsWith("[IMAGE]:")) {
@@ -434,21 +635,28 @@ private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) 
         }
     }
 
+    // =========================================================================
+    // KHU VỰC SỬA LỖI CHÍNH: TỰ ĐỘNG CO GIÃN THEO TEXT & BO TRÒN ĐẸP MẮT
+    // =========================================================================
     /**
- * Adds a text bubble to the chat area.
- *
- * @param text the message text to display
- * @param isMe true if the message was sent by the local user (right‑aligned)
+ * Creates and adds a text chat bubble to the conversation view.
+ * The bubble width is limited to a maximum of 3 cm (converted to pixels).
+ * The height is automatically calculated based on the wrapped text.
+ * @param text The message text to display.
+ * @param isMe True if the message was sent by the current user.
  */
 private void appendChatBubble(String text, boolean isMe) {
         Box row = Box.createHorizontalBox();
 
         JTextArea bubbleArea = new JTextArea(text);
         bubbleArea.setFont(new Font("Segoe UI", Font.PLAIN, 15));
+        bubbleArea.setForeground(isMe ? Color.BLACK : TEXT_MAIN);
         bubbleArea.setEditable(false);
         bubbleArea.setLineWrap(true);
         bubbleArea.setWrapStyleWord(true);
-        bubbleArea.setBorder(new EmptyBorder(10, 14, 10, 14));
+        bubbleArea.setOpaque(false);
+        // Đặt lề trong cho bong bóng chat chữ: Trên=10, Trái=16, Dưới=10, Phải=16
+        bubbleArea.setBorder(new EmptyBorder(10, 16, 10, 16));
 
         JPanel bubblePanel = new JPanel(new BorderLayout()) {
             @Override
@@ -456,31 +664,44 @@ private void appendChatBubble(String text, boolean isMe) {
                 Graphics2D g2d = (Graphics2D) g.create();
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g2d.setColor(getBackground());
-                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 16, 16);
+                // Vẽ góc bo tròn 24px siêu mượt chuẩn phong cách Messenger hiện đại
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 24, 24);
                 g2d.dispose();
             }
         };
         bubblePanel.setOpaque(false);
         bubblePanel.add(bubbleArea, BorderLayout.CENTER);
 
-        int maxWidth = 420;
-        int preferredWidth = bubbleArea.getFontMetrics(bubbleArea.getFont()).stringWidth(text) + 35;
-        bubblePanel.setMaximumSize(new Dimension(Math.min(preferredWidth, maxWidth), Integer.MAX_VALUE));
+        // THUẬT TOÁN ĐO ĐẠC KÍCH THƯỚC ĐỘNG TỰ ĐỘNG KHÍT THEO CHỮ KHÔNG PHÌNH DỌC
+        int maxWidth = TEXT_BUBBLE_MAX_WIDTH_PX;
+        FontMetrics fm = bubbleArea.getFontMetrics(bubbleArea.getFont());
+        int calculatedTextWidth = fm.stringWidth(text) + 36; // Cộng bù trừ độ rộng khoảng trống padding
+        int finalWidth = Math.min(calculatedTextWidth, maxWidth);
+
+        // Đồng bộ chiều rộng tạm thời để JTextArea tự tính toán lại chiều cao chuẩn khi nhảy dòng
+        bubbleArea.setSize(new Dimension(finalWidth, Integer.MAX_VALUE));
+        int finalHeight = bubbleArea.getPreferredSize().height;
+
+        // Ép cố định bộ kích thước, chặn hoàn toàn cơ chế tự co giãn bóp méo dọc của BoxLayout
+        Dimension exactBubbleSize = new Dimension(finalWidth, finalHeight);
+        bubblePanel.setPreferredSize(exactBubbleSize);
+        bubblePanel.setMaximumSize(exactBubbleSize);
+        bubblePanel.setMinimumSize(exactBubbleSize);
 
         if (isMe) {
-            bubblePanel.setBackground(new Color(213, 236, 255));
-            bubbleArea.setBackground(new Color(213, 236, 255));
+            bubblePanel.setBackground(BUBBLE_ME);
             row.add(Box.createHorizontalGlue());
             row.add(bubblePanel);
+            row.add(Box.createHorizontalStrut(4)); // Tạo khoảng cách nhẹ so với viền mép phải
         } else {
             bubblePanel.setBackground(Color.WHITE);
-            bubbleArea.setBackground(Color.WHITE);
+            row.add(Box.createHorizontalStrut(4)); // Tạo khoảng cách nhẹ so với viền mép trái
             row.add(bubblePanel);
             row.add(Box.createHorizontalGlue());
         }
 
         chatBoxContainer.add(row);
-        chatBoxContainer.add(Box.createVerticalStrut(12));
+        chatBoxContainer.add(Box.createVerticalStrut(10)); // Khoảng cách giãn giữa các tin nhắn liền kề
         chatBoxContainer.revalidate();
         chatBoxContainer.repaint();
 
@@ -490,14 +711,7 @@ private void appendChatBubble(String text, boolean isMe) {
         });
     }
 
-    /**
- * Adds an image bubble to the chat area.
- * The image is scaled down if it exceeds a maximum width.
- *
- * @param icon  the image to display
- * @param isMe  true if the image was sent by the local user (right‑aligned)
- */
-private void appendImageBubble(ImageIcon icon, boolean isMe) {
+    private void appendImageBubble(ImageIcon icon, boolean isMe) {
         int maxWidth = 320;
         if (icon.getIconWidth() > maxWidth) {
             Image scaled = icon.getImage().getScaledInstance(maxWidth, -1, Image.SCALE_SMOOTH);
@@ -506,34 +720,42 @@ private void appendImageBubble(ImageIcon icon, boolean isMe) {
 
         Box row = Box.createHorizontalBox();
         JLabel imgLabel = new JLabel(icon);
-        imgLabel.setBorder(new EmptyBorder(5, 5, 5, 5));
 
+        // Panel thông minh vẽ nền bo tròn bọc toàn bộ khối ảnh góc 20px
         JPanel bubblePanel = new JPanel(new BorderLayout()) {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2d = (Graphics2D) g.create();
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g2d.setColor(getBackground());
-                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 16, 16);
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
                 g2d.dispose();
             }
         };
         bubblePanel.setOpaque(false);
         bubblePanel.add(imgLabel, BorderLayout.CENTER);
-        bubblePanel.setMaximumSize(new Dimension(icon.getIconWidth() + 10, icon.getIconHeight() + 10));
+        bubblePanel.setBorder(new EmptyBorder(3, 3, 3, 3)); // Padding viền ảnh tinh tế
+
+        // Khóa chiều cao tối đa cho ảnh chat để không bị BoxLayout Y_AXIS kéo giãn dọc màn hình
+        Dimension imgSize = new Dimension(icon.getIconWidth() + 6, icon.getIconHeight() + 6);
+        bubblePanel.setPreferredSize(imgSize);
+        bubblePanel.setMaximumSize(imgSize);
+        bubblePanel.setMinimumSize(imgSize);
 
         if (isMe) {
-            bubblePanel.setBackground(new Color(213, 236, 255));
+            bubblePanel.setBackground(BUBBLE_ME);
             row.add(Box.createHorizontalGlue());
             row.add(bubblePanel);
+            row.add(Box.createHorizontalStrut(4));
         } else {
             bubblePanel.setBackground(Color.WHITE);
+            row.add(Box.createHorizontalStrut(4));
             row.add(bubblePanel);
             row.add(Box.createHorizontalGlue());
         }
 
         chatBoxContainer.add(row);
-        chatBoxContainer.add(Box.createVerticalStrut(12));
+        chatBoxContainer.add(Box.createVerticalStrut(10));
         chatBoxContainer.revalidate();
         chatBoxContainer.repaint();
 
@@ -543,58 +765,44 @@ private void appendImageBubble(ImageIcon icon, boolean isMe) {
         });
     }
 
-    // =========================================================================
-    // 4. BONG BÓNG HIỂN THỊ FILE CHUẨN ZALO (NHƯ ẢNH MINH HỌA)
-    // =========================================================================
-    /**
- * Creates a file bubble that mimics Zalo's file preview UI.
- * The file bytes are written to a temporary file for preview/download actions.
- *
- * @param fileName the original file name (used for icon selection and display)
- * @param data     the raw file data (Base64‑decoded)
- * @param isMe     true if the file was sent by the local user (right‑aligned)
- */
-private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
+    private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
         try {
-            // Khởi tạo file tạm thời lưu trữ ngầm
             File tempFile = File.createTempFile("zalo_file_", "_" + fileName);
             Files.write(tempFile.toPath(), data, StandardOpenOption.CREATE);
             tempFile.deleteOnExit();
 
             Box row = Box.createHorizontalBox();
 
-            // Khung panel chính chứa toàn bộ cấu trúc file bo tròn góc mẫu Zalo
             JPanel bubblePanel = new JPanel(new BorderLayout(15, 0)) {
                 @Override
                 protected void paintComponent(Graphics g) {
                     Graphics2D g2d = (Graphics2D) g.create();
                     g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     g2d.setColor(getBackground());
-                    g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 12, 12); // Góc bo nhẹ cao cấp
+                    g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
                     g2d.dispose();
                 }
             };
             bubblePanel.setOpaque(false);
-            bubblePanel.setBackground(Color.WHITE); // Giữ nền trắng sạch sẽ chuẩn Zalo cho cả 2 bên
+            bubblePanel.setBackground(Color.WHITE);
             bubblePanel.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(new Color(218, 223, 230), 1, true),
-                    new EmptyBorder(12, 14, 12, 14)
+                    BorderFactory.createLineBorder(new Color(225, 228, 232), 1, true),
+                    new EmptyBorder(12, 16, 12, 16)
             ));
 
-            // --- THÀNH PHẦN 1: ICON KHỐI FILE PHÍA TRÁI (Word, Excel, PDF, Chung) ---
             String lowerName = fileName.toLowerCase();
-            String fileIconSymbol = "📄"; // Icon mặc định
-            Color iconBgColor = new Color(110, 130, 145); // Màu xám mặc định
+            String fileIconSymbol = "📄";
+            Color iconBgColor = new Color(140, 150, 160);
 
             if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
-                fileIconSymbol = "W";
-                iconBgColor = new Color(43, 87, 154); // Xanh Word chuẩn
+                fileIconSymbol = "DOC";
+                iconBgColor = new Color(43, 87, 154);
             } else if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-                fileIconSymbol = "X";
-                iconBgColor = new Color(33, 115, 70); // Xanh lá Excel
+                fileIconSymbol = "XLS";
+                iconBgColor = new Color(33, 115, 70);
             } else if (lowerName.endsWith(".pdf")) {
                 fileIconSymbol = "PDF";
-                iconBgColor = new Color(222, 54, 32); // Đỏ PDF
+                iconBgColor = new Color(222, 54, 32);
             }
 
             final String finalSymbol = fileIconSymbol;
@@ -605,51 +813,42 @@ private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
                     Graphics2D g2d = (Graphics2D) g.create();
                     g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     g2d.setColor(finalIconBgColor);
-                    g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8); // Khối vuông bo góc
+                    g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
                     g2d.dispose();
                 }
             };
             iconBlock.setOpaque(false);
-            iconBlock.setPreferredSize(new Dimension(45, 45));
+            iconBlock.setPreferredSize(new Dimension(48, 48));
 
             JLabel lblSymbol = new JLabel(finalSymbol);
-            lblSymbol.setFont(new Font("Segoe UI", Font.BOLD, finalSymbol.length() > 2 ? 11 : 16));
+            lblSymbol.setFont(new Font("Segoe UI", Font.BOLD, 12));
             lblSymbol.setForeground(Color.WHITE);
             iconBlock.add(lblSymbol);
             bubblePanel.add(iconBlock, BorderLayout.WEST);
 
-            // --- THÀNH PHẦN 2: THÔNG TIN FILE (Tên file, Dung lượng, Trạng thái) ---
             JPanel infoPanel = new JPanel();
             infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
             infoPanel.setOpaque(false);
 
             JLabel lblFileName = new JLabel(fileName);
             lblFileName.setFont(new Font("Segoe UI", Font.BOLD, 14));
-            lblFileName.setForeground(new Color(30, 35, 40));
+            lblFileName.setForeground(TEXT_MAIN);
             infoPanel.add(lblFileName);
-            infoPanel.add(Box.createVerticalStrut(3));
+            infoPanel.add(Box.createVerticalStrut(4));
 
-            // Tính toán dung lượng ảo cho đẹp mắt
             String sizeText = (data.length / 1024 > 0) ? (data.length / 1024) + " KB" : "1 KB";
-            JLabel lblMeta = new JLabel(sizeText + "   •   ✓ Đã có trên máy");
+            JLabel lblMeta = new JLabel(sizeText + "  •  Sẵn sàng");
             lblMeta.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-            lblMeta.setForeground(new Color(40, 167, 69)); // Trạng thái xanh lá cây tươi mát của Zalo
+            lblMeta.setForeground(new Color(52, 168, 83));
             infoPanel.add(lblMeta);
 
             bubblePanel.add(infoPanel, BorderLayout.CENTER);
 
-            // --- THÀNH PHẦN 3: CỤM NÚT ĐIỀU KHIỂN BÊN PHẢI (Mở mục / Tải xuống) ---
-            JPanel actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            JPanel actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
             actionsPanel.setOpaque(false);
 
-            // Nút 1: Mở thư mục chứa file tạm
-            JButton btnOpenFolder = new JButton("📁");
-            btnOpenFolder.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 14));
-            btnOpenFolder.setContentAreaFilled(false);
-            btnOpenFolder.setBorderPainted(false);
-            btnOpenFolder.setFocusPainted(false);
-            btnOpenFolder.setCursor(new Cursor(Cursor.HAND_CURSOR));
-            btnOpenFolder.setToolTipText("Mở thư mục chứa file");
+            JButton btnOpenFolder = createStyledToolbarButton("📁");
+            btnOpenFolder.setToolTipText("Mở thư mục");
             btnOpenFolder.addActionListener(e -> {
                 try {
                     Desktop.getDesktop().open(tempFile.getParentFile());
@@ -659,14 +858,8 @@ private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
             });
             actionsPanel.add(btnOpenFolder);
 
-            // Nút 2: Click trực tiếp để mở file
-            JButton btnDownload = new JButton("📥");
-            btnDownload.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 14));
-            btnDownload.setContentAreaFilled(false);
-            btnDownload.setBorderPainted(false);
-            btnDownload.setFocusPainted(false);
-            btnDownload.setCursor(new Cursor(Cursor.HAND_CURSOR));
-            btnDownload.setToolTipText("Mở chạy tệp tin nhanh");
+            JButton btnDownload = createStyledToolbarButton("📥");
+            btnDownload.setToolTipText("Mở tệp tin");
             btnDownload.addActionListener(e -> {
                 try {
                     Desktop.getDesktop().open(tempFile);
@@ -677,19 +870,25 @@ private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
             actionsPanel.add(btnDownload);
 
             bubblePanel.add(actionsPanel, BorderLayout.EAST);
-            bubblePanel.setMaximumSize(new Dimension(380, 70));
 
-            // Căn lề trái / phải dựa theo người gửi cuộc thoại
+            // Ép kích thước khối File cố định tránh va vấp layout
+            Dimension fileSize = new Dimension(420, 75);
+            bubblePanel.setPreferredSize(fileSize);
+            bubblePanel.setMaximumSize(fileSize);
+            bubblePanel.setMinimumSize(fileSize);
+
             if (isMe) {
                 row.add(Box.createHorizontalGlue());
                 row.add(bubblePanel);
+                row.add(Box.createHorizontalStrut(4));
             } else {
+                row.add(Box.createHorizontalStrut(4));
                 row.add(bubblePanel);
                 row.add(Box.createHorizontalGlue());
             }
 
             chatBoxContainer.add(row);
-            chatBoxContainer.add(Box.createVerticalStrut(12));
+            chatBoxContainer.add(Box.createVerticalStrut(14));
             chatBoxContainer.revalidate();
             chatBoxContainer.repaint();
 
@@ -698,7 +897,7 @@ private void appendFileBubble(String fileName, byte[] data, boolean isMe) {
                 vertical.setValue(vertical.getMaximum());
             });
         } catch (IOException e) {
-            appendChatBubble("[FILE]: " + fileName + " (Lỗi xử lý file tuần tự)", isMe);
+            appendChatBubble("[FILE]: " + fileName + " (Lỗi xử lý file)", isMe);
         }
     }
 }
