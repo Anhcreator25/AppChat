@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChatServer {
     private static final int PORT = 12345;
 
-    // Sử dụng ConcurrentHashMap để đảm bảo an toàn đa luồng (Thread-safe) khi quản lý danh sách Online
+
     private static final Map<String, ClientHandler> onlineUsers = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {

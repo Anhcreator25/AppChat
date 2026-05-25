@@ -62,7 +62,7 @@ public ChatClientUI(String myUsername, ChatClientCore core) {
         setLayout(new BorderLayout());
 
         // =========================================================================
-        // 1. THANH DANH SÁCH TRÁI (DANH SÁCH BẠN BÈ)
+        // 1. Page list friend
         // =========================================================================
         JPanel leftPanel = new JPanel(new BorderLayout());
         leftPanel.setPreferredSize(new Dimension(280, 650));
@@ -128,7 +128,7 @@ public ChatClientUI(String myUsername, ChatClientCore core) {
         add(leftPanel, BorderLayout.WEST);
 
         // =========================================================================
-        // 2. KHUNG HIỂN THỊ CHAT BÊN PHẢI
+        // 2. Panel show chat
         // =========================================================================
         JPanel rightPanel = new JPanel(new BorderLayout());
         rightPanel.setBackground(new Color(238, 240, 242));
@@ -156,7 +156,7 @@ public ChatClientUI(String myUsername, ChatClientCore core) {
         rightPanel.add(chatScrollPane, BorderLayout.CENTER);
 
         // =========================================================================
-        // 3. KHUNG NHẬP LIỆU VÀ TIỆN ÍCH DƯỚI ĐÁY (Đã chuyển nút sang TRÁI ô nhập)
+        // 3. Panel enter
         // =========================================================================
         JPanel bottomAreaPanel = new JPanel(new BorderLayout());
         bottomAreaPanel.setBackground(Color.WHITE);

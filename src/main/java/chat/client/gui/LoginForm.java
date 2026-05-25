@@ -39,13 +39,13 @@ public class LoginForm extends JFrame {
 
     private JPanel createLoginPanel() {
         JPanel mainPanel = new JPanel(new GridBagLayout());
-        mainPanel.setBackground(new Color(245, 239, 230));
+        mainPanel.setBackground(new Color(0, 145, 255));
 
         JPanel card = new JPanel();
         card.setPreferredSize(new Dimension(320, 280));
         card.setBackground(Color.WHITE);
         card.setLayout(null);
-        card.setBorder(BorderFactory.createLineBorder(new Color(220, 220, 220)));
+        card.setBorder(BorderFactory.createLineBorder(new Color(0, 145, 255)));
         mainPanel.add(card);
 
         JLabel lblTitle = new JLabel("APP CHAT", JLabel.CENTER);
@@ -97,7 +97,7 @@ public class LoginForm extends JFrame {
 
         btnLogin = new JButton("ĐĂNG NHẬP");
         btnLogin.setBounds(30, 201, 260, 32);
-        btnLogin.setBackground(new Color(111, 78, 55));
+        btnLogin.setBackground(new Color(0, 145, 255));
         btnLogin.setForeground(Color.WHITE);
         btnLogin.setFont(new Font("Segoe UI", Font.BOLD, 14));
         btnLogin.setFocusPainted(false);
@@ -108,7 +108,7 @@ public class LoginForm extends JFrame {
         JLabel lblregister = new JLabel("<html>Bạn chưa có tài khoản? <u>Đăng Ký</u></html>", JLabel.CENTER);
         lblregister.setBounds(60, 230, 200, 25);
         lblregister.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        lblregister.setForeground(new Color(111, 78, 55));
+        lblregister.setForeground(new Color(0, 145, 255));
         lblregister.setCursor(new Cursor(Cursor.HAND_CURSOR));
         card.add(lblregister);
 
