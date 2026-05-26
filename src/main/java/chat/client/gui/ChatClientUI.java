@@ -1,6 +1,7 @@
 package chat.client.gui;
 
 import chat.client.network.ChatClientCore;
+import chat.client.network.ChatbotService;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -19,6 +20,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
+import javax.swing.Timer;
+import chat.client.util.BotHistoryManager;
 
 public class ChatClientUI extends JFrame {
     private final String myUsername;
@@ -44,6 +49,9 @@ public class ChatClientUI extends JFrame {
     private JButton btnSend;
     private JButton btnAttach;
     private JButton btnEmoji;
+private JButton btnClearHistory;
+private static final String BOT_NAME = "Gemini Bot";
+private static final String BOT_ICON = "🤖";
 
     // --- BẢNG MÀU MESSENGER PREMIUM ---
     private static final Color PRIMARY_BLUE = new Color(0, 132, 255);
@@ -68,12 +76,18 @@ public class ChatClientUI extends JFrame {
         String lastMessage;
         String timeAgo;
         boolean isOnline;
+        String icon; // optional Unicode icon (e.g., 🤖) or null for default avatar
 
         public ContactItem(String username, String lastMessage, String timeAgo, boolean isOnline) {
+            this(username, lastMessage, timeAgo, isOnline, null);
+        }
+
+        public ContactItem(String username, String lastMessage, String timeAgo, boolean isOnline, String icon) {
             this.username = username;
             this.lastMessage = lastMessage;
             this.timeAgo = timeAgo;
             this.isOnline = isOnline;
+            this.icon = icon;
         }
     }
 
@@ -166,6 +180,10 @@ public class ChatClientUI extends JFrame {
         onlineJList.setBackground(BACKGROUND_LEFT);
         onlineJList.setSelectionBackground(new Color(242, 244, 247));
         onlineJList.setSelectionForeground(TEXT_MAIN);
+        // Add Gemini Bot as the first contact
+        ContactItem botItem = new ContactItem(BOT_NAME, "Nhấp để trò chuyện với AI", "1 phút", true, BOT_ICON);
+        contactsMap.put(BOT_NAME, botItem);
+        onlineListModel.addElement(botItem);
 
         onlineJList.setCellRenderer(new ListCellRenderer<ContactItem>() {
             @Override
@@ -186,13 +204,13 @@ public class ChatClientUI extends JFrame {
                         g2d.setColor(new Color(225, 227, 230));
                         g2d.fill(new Ellipse2D.Double(0, 4, 44, 44));
 
+                        String display = value.icon != null ? value.icon : ((value.username == null || value.username.isEmpty()) ? "?" : value.username.substring(0, 1).toUpperCase());
                         g2d.setColor(TEXT_MUTED);
-                        g2d.setFont(new Font("Segoe UI", Font.BOLD, 16));
-                        String initial = (value.username == null || value.username.isEmpty()) ? "?" : value.username.substring(0, 1).toUpperCase();
+                        g2d.setFont(new Font("Segoe UI Emoji", Font.BOLD, 20));
                         FontMetrics fm = g2d.getFontMetrics();
-                        int textX = (44 - fm.stringWidth(initial)) / 2;
+                        int textX = (44 - fm.stringWidth(display)) / 2;
                         int textY = ((44 - fm.getHeight()) / 2) + fm.getAscent() + 4;
-                        g2d.drawString(initial, textX, textY);
+                        g2d.drawString(display, textX, textY);
 
                         if (value.isOnline) {
                             g2d.setColor(Color.WHITE);
@@ -240,11 +258,29 @@ public class ChatClientUI extends JFrame {
                     chatBoxContainer.revalidate();
                     chatBoxContainer.repaint();
 
-                    historyOffset = 0;
-                    receivedHistoryCount = 0;
-                    allHistoryLoaded = false;
-                    loadingHistory = true;
-                    core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
+                    if (BOT_NAME.equals(currentSelectedUser)) {
+                        // Load bot history from file
+                        List<String> lines = BotHistoryManager.load();
+                        for (String line : lines) {
+                            int sep = line.indexOf('|');
+                            if (sep > 0) {
+                                String role = line.substring(0, sep);
+                                String content = line.substring(sep + 1);
+                                boolean isMe = "USER".equals(role);
+                                appendChatBubble(content, isMe);
+                            }
+                        }
+                        // Show clear button
+                        btnClearHistory.setVisible(true);
+                    } else {
+                        // Normal user: hide clear button and request history
+                        btnClearHistory.setVisible(false);
+                        historyOffset = 0;
+                        receivedHistoryCount = 0;
+                        allHistoryLoaded = false;
+                        loadingHistory = true;
+                        core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
+                    }
                 }
             }
         });
@@ -270,6 +306,16 @@ public class ChatClientUI extends JFrame {
         lblChatHeader.setForeground(TEXT_MAIN);
         lblChatHeader.setBorder(new EmptyBorder(0, 24, 0, 0));
         rightHeader.add(lblChatHeader, BorderLayout.CENTER);
+        btnClearHistory = createStyledToolbarButton("🗑");
+        btnClearHistory.setToolTipText("Xóa lịch sử bot");
+        btnClearHistory.addActionListener(e -> {
+            BotHistoryManager.clear();
+            chatBoxContainer.removeAll();
+            chatBoxContainer.revalidate();
+            chatBoxContainer.repaint();
+        });
+        btnClearHistory.setVisible(false);
+        rightHeader.add(btnClearHistory, BorderLayout.EAST);
         rightPanel.add(rightHeader, BorderLayout.NORTH);
 
         chatBoxContainer = new JPanel();
@@ -464,11 +510,59 @@ private void performSendMessage() {
             return;
         }
 
-        core.sendPrivateMessage(currentSelectedUser, msg);
-        appendChatBubble(msg, true);
+        if (BOT_NAME.equals(currentSelectedUser)) {
+            // User message to bot
+            appendChatBubble(msg, true);
+            txtInput.setText("");
+            txtInput.requestFocus();
 
-        txtInput.setText("");
-        txtInput.requestFocus();
+            // Add typing bubble
+            JComponent typingBubble = createTypingBubble();
+            chatBoxContainer.add(typingBubble);
+            chatBoxContainer.revalidate();
+            chatBoxContainer.repaint();
+
+            // Save user message to history
+            BotHistoryManager.appendUser(msg);
+
+            // Call Gemini API in background
+            SwingWorker<String, Void> worker = new SwingWorker<String, Void>() {
+                @Override
+                protected String doInBackground() throws Exception {
+                    return ChatbotService.ask(msg);
+                }
+
+                @Override
+                protected void done() {
+                    chatBoxContainer.remove(typingBubble);
+                    try {
+                        String reply = get();
+                        if (reply == null) reply = "";
+                        if (reply.startsWith("Lỗi:") || reply.startsWith("Google AI trả về mã lỗi")) {
+                            appendErrorBubble(reply, false);
+                            JOptionPane.showMessageDialog(ChatClientUI.this, reply, "Lỗi Bot", JOptionPane.ERROR_MESSAGE);
+                        } else {
+                            appendChatBubble(reply, false);
+                            BotHistoryManager.appendBot(reply);
+                        }
+                    } catch (Exception ex) {
+                        String err = "Lỗi kết nối Chatbot: " + ex.getMessage();
+                        appendErrorBubble(err, false);
+                        JOptionPane.showMessageDialog(ChatClientUI.this, err, "Lỗi Bot", JOptionPane.ERROR_MESSAGE);
+                    }
+                    chatBoxContainer.revalidate();
+                    chatBoxContainer.repaint();
+                }
+            };
+            worker.execute();
+        } else {
+            // Normal user flow
+            core.sendPrivateMessage(currentSelectedUser, msg);
+            appendChatBubble(msg, true);
+
+            txtInput.setText("");
+            txtInput.requestFocus();
+        }
     }
 
     /**
@@ -576,7 +670,7 @@ private void setupNetworkListeners() {
         core.addContactsListener(users -> SwingUtilities.invokeLater(() -> {
             for (String user : users) {
                 if (!user.equals(myUsername) && !contactsMap.containsKey(user)) {
-                    ContactItem ci = new ContactItem(user, "Nhấp để trò chuyện...", "1 phút", false);
+                    ContactItem ci = new ContactItem(user, "Nhấp để trò chuyện...", "1 phút", false, null);
                     contactsMap.put(user, ci);
                     onlineListModel.addElement(ci);
                 }
@@ -592,7 +686,7 @@ private void setupNetworkListeners() {
             }
             for (String user : onlineSet) {
                 if (!user.equals(myUsername) && !contactsMap.containsKey(user)) {
-                    ContactItem ci = new ContactItem(user, "Nhấp để trò chuyện...", "1 phút", true);
+                    ContactItem ci = new ContactItem(user, "Nhấp để trò chuyện...", "1 phút", true, null);
                     contactsMap.put(user, ci);
                     onlineListModel.addElement(ci);
                 }
@@ -745,6 +839,65 @@ private void appendChatBubble(String text, boolean isMe) {
         });
     }
 
+    private void appendErrorBubble(String text, boolean isMe) {
+        Box row = Box.createHorizontalBox();
+
+        JTextArea bubbleArea = new JTextArea(text);
+        bubbleArea.setFont(new Font("Segoe UI", Font.PLAIN, 15));
+        bubbleArea.setForeground(Color.BLACK);
+        bubbleArea.setEditable(false);
+        bubbleArea.setLineWrap(true);
+        bubbleArea.setWrapStyleWord(true);
+        bubbleArea.setOpaque(false);
+        bubbleArea.setBorder(new EmptyBorder(10, 16, 10, 16));
+
+        JPanel bubblePanel = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(new Color(255, 180, 100));
+                g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 24, 24);
+                g2d.dispose();
+            }
+        };
+        bubblePanel.setOpaque(false);
+        bubblePanel.add(bubbleArea, BorderLayout.CENTER);
+
+        int maxWidth = TEXT_BUBBLE_MAX_WIDTH_PX;
+        FontMetrics fm = bubbleArea.getFontMetrics(bubbleArea.getFont());
+        int calculatedTextWidth = fm.stringWidth(text) + 36;
+        int finalWidth = Math.min(calculatedTextWidth, maxWidth);
+        bubbleArea.setSize(new Dimension(finalWidth, Integer.MAX_VALUE));
+        int finalHeight = bubbleArea.getPreferredSize().height;
+        Dimension exactBubbleSize = new Dimension(finalWidth, finalHeight);
+        bubblePanel.setPreferredSize(exactBubbleSize);
+        bubblePanel.setMaximumSize(exactBubbleSize);
+        bubblePanel.setMinimumSize(exactBubbleSize);
+
+        if (isMe) {
+            bubblePanel.setBackground(BUBBLE_ME);
+            row.add(Box.createHorizontalGlue());
+            row.add(bubblePanel);
+            row.add(Box.createHorizontalStrut(4));
+        } else {
+            bubblePanel.setBackground(Color.WHITE);
+            row.add(Box.createHorizontalStrut(4));
+            row.add(bubblePanel);
+            row.add(Box.createHorizontalGlue());
+        }
+
+        chatBoxContainer.add(row);
+        chatBoxContainer.add(Box.createVerticalStrut(10));
+        chatBoxContainer.revalidate();
+        chatBoxContainer.repaint();
+
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar vertical = chatScrollPane.getVerticalScrollBar();
+            vertical.setValue(vertical.getMaximum());
+        });
+    }
+
     private void appendIconBubble(String icon, boolean isMe) {
         // Render the emoji as a small image and reuse the existing image bubble logic.
         // This avoids issues with JLabel text rendering of color emojis on some platforms.
@@ -770,7 +923,38 @@ private void appendChatBubble(String text, boolean isMe) {
     }
 
 
-private void appendImageBubble(ImageIcon icon, boolean isMe) {
+private JComponent createTypingBubble() {
+        JPanel bubble = new JPanel(new BorderLayout()) {
+            private boolean visible = true;
+            {
+                Timer timer = new Timer(500, e -> {
+                    visible = !visible;
+                    setBackground(visible ? new Color(240, 242, 245) : new Color(255, 255, 255));
+                    repaint();
+                });
+                timer.start();
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.setColor(getBackground());
+                g.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
+                g.setColor(Color.GRAY);
+                g.setFont(new Font("Segoe UI", Font.ITALIC, 14));
+                FontMetrics fm = g.getFontMetrics();
+                String txt = "Bot đang trả lời…";
+                int x = (getWidth() - fm.stringWidth(txt)) / 2;
+                int y = (getHeight() + fm.getAscent()) / 2 - 2;
+                g.drawString(txt, x, y);
+            }
+        };
+        bubble.setOpaque(false);
+        bubble.setPreferredSize(new Dimension(TEXT_BUBBLE_MAX_WIDTH_PX, 30));
+        return bubble;
+    }
+
+    private void appendImageBubble(ImageIcon icon, boolean isMe) {
         int maxWidth = 320;
         if (icon.getIconWidth() > maxWidth) {
             Image scaled = icon.getImage().getScaledInstance(maxWidth, -1, Image.SCALE_SMOOTH);
