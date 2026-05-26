@@ -301,6 +301,7 @@ public class ChatClientUI extends JFrame {
         leftActionPanel.add(btnAttach);
 
         btnEmoji = createStyledToolbarButton("😀");
+
         btnEmoji.addActionListener(e -> handleEmojiSelect());
         leftActionPanel.add(btnEmoji);
 
@@ -499,12 +500,12 @@ private void handleFileAttach() {
                 byte[] bytes = Files.readAllBytes(file.toPath());
                 core.sendFileMessage(currentSelectedUser, file, type);
 
-                if ("IMAGE".equals(type)) {
-                    ImageIcon icon = new ImageIcon(file.getAbsolutePath());
-                    appendImageBubble(icon, true);
-                } else {
-                    appendFileBubble(file.getName(), bytes, true);
-                }
+if ("IMAGE".equals(type)) {
+    ImageIcon icon = new ImageIcon(file.getAbsolutePath());
+    appendImageBubble(icon, true);
+} else {
+    appendFileBubble(file.getName(), bytes, true);
+}
             } catch (IOException ex) {
                 ex.printStackTrace();
             }
@@ -515,20 +516,52 @@ private void handleFileAttach() {
  * Opens a dialog to let the user select an emoji from a predefined list.
  * The chosen emoji is sent as an icon message and displayed as a text bubble.
  */
-private void handleEmojiSelect() {
+    private void handleEmojiSelect() {
+        // 1. Kiểm tra xem đã chọn người chat chưa
         if (currentSelectedUser == null) {
-            JOptionPane.showMessageDialog(this, "Vui lòng chọn một người để gửi biểu tượng!");
+            JOptionPane.showMessageDialog(this,
+                    "Vui lòng chọn một người để gửi biểu tượng!",
+                    "Thông báo", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        String[] emojis = {"😀","😂","😍","👍","🎉","❤️","😎","🙏","😭","😮"};
-        String selected = (String) JOptionPane.showInputDialog(
-                this, "Chọn biểu tượng cảm xúc:", "Premium Emojis",
-                JOptionPane.PLAIN_MESSAGE, null, emojis, emojis[0]
-        );
-        if (selected != null) {
-            core.sendIconMessage(currentSelectedUser, selected);
-            appendChatBubble(selected, true);
+
+        String[] emojis = {"😀", "😂", "😍", "👍", "🎉", "❤️", "😎", "🙏", "😱", "😮"};
+
+        JPopupMenu emojiMenu = new JPopupMenu();
+        JPanel panel = new JPanel(new GridLayout(2, 5, 6, 6));
+        panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+        panel.setBackground(Color.WHITE);
+
+        for (String emoji : emojis) {
+            JButton btn = new JButton(emoji);
+            btn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 18)); // Ép font hiển thị icon màu không bị ô vuông
+            btn.setPreferredSize(new Dimension(42, 42));
+            btn.setContentAreaFilled(false);
+            btn.setFocusPainted(false);
+            btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            btn.setBorder(BorderFactory.createEmptyBorder());
+
+            btn.addMouseListener(new java.awt.event.MouseAdapter() {
+                public void mouseEntered(java.awt.event.MouseEvent evt) {
+                    btn.setContentAreaFilled(true);
+                    btn.setBackground(new Color(240, 242, 245));
+                }
+                public void mouseExited(java.awt.event.MouseEvent evt) {
+                    btn.setContentAreaFilled(false);
+                }
+            });
+
+            btn.addActionListener(e -> {
+                core.sendIconMessage(currentSelectedUser, emoji);
+                appendIconBubble(emoji, true);
+                emojiMenu.setVisible(false);
+            });
+
+            panel.add(btn);
         }
+        emojiMenu.add(panel);
+        int popupHeight = 100; // Chiều cao ước tính của khung 2 hàng
+        emojiMenu.show(btnEmoji, 0, -popupHeight);
     }
 
     /**
@@ -630,14 +663,15 @@ private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) 
             } else {
                 appendChatBubble(formattedMsg, isMe);
             }
+        } else if (formattedMsg.startsWith("[ICON]:")) {
+            String icon = formattedMsg.substring("[ICON]:".length());
+            appendIconBubble(icon, isMe);
         } else {
             appendChatBubble(formattedMsg, isMe);
         }
     }
 
-    // =========================================================================
-    // KHU VỰC SỬA LỖI CHÍNH: TỰ ĐỘNG CO GIÃN THEO TEXT & BO TRÒN ĐẸP MẮT
-    // =========================================================================
+
     /**
  * Creates and adds a text chat bubble to the conversation view.
  * The bubble width is limited to a maximum of 3 cm (converted to pixels).
@@ -672,10 +706,10 @@ private void appendChatBubble(String text, boolean isMe) {
         bubblePanel.setOpaque(false);
         bubblePanel.add(bubbleArea, BorderLayout.CENTER);
 
-        // THUẬT TOÁN ĐO ĐẠC KÍCH THƯỚC ĐỘNG TỰ ĐỘNG KHÍT THEO CHỮ KHÔNG PHÌNH DỌC
+
         int maxWidth = TEXT_BUBBLE_MAX_WIDTH_PX;
         FontMetrics fm = bubbleArea.getFontMetrics(bubbleArea.getFont());
-        int calculatedTextWidth = fm.stringWidth(text) + 36; // Cộng bù trừ độ rộng khoảng trống padding
+        int calculatedTextWidth = fm.stringWidth(text) + 36;
         int finalWidth = Math.min(calculatedTextWidth, maxWidth);
 
         // Đồng bộ chiều rộng tạm thời để JTextArea tự tính toán lại chiều cao chuẩn khi nhảy dòng
@@ -711,7 +745,32 @@ private void appendChatBubble(String text, boolean isMe) {
         });
     }
 
-    private void appendImageBubble(ImageIcon icon, boolean isMe) {
+    private void appendIconBubble(String icon, boolean isMe) {
+        // Render the emoji as a small image and reuse the existing image bubble logic.
+        // This avoids issues with JLabel text rendering of color emojis on some platforms.
+        int sz = 48; // size of the generated square icon
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(sz, sz, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = img.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        // Background circle (optional – use a light background for better contrast)
+        Color bg = isMe ? BUBBLE_ME : new Color(230, 230, 230);
+        g2.setColor(bg);
+        g2.fillRoundRect(0, 0, sz, sz, 12, 12);
+        // Draw the emoji text in the centre
+        g2.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 24));
+        FontMetrics fm = g2.getFontMetrics();
+        int txtX = (sz - fm.stringWidth(icon)) / 2;
+        int txtY = (sz - fm.getHeight()) / 2 + fm.getAscent();
+        g2.setColor(Color.BLACK);
+        g2.drawString(icon, txtX, txtY);
+        g2.dispose();
+        ImageIcon emojiIcon = new ImageIcon(img);
+        // Reuse the image bubble renderer – it already handles sizing and background.
+        appendImageBubble(emojiIcon, isMe);
+    }
+
+
+private void appendImageBubble(ImageIcon icon, boolean isMe) {
         int maxWidth = 320;
         if (icon.getIconWidth() > maxWidth) {
             Image scaled = icon.getImage().getScaledInstance(maxWidth, -1, Image.SCALE_SMOOTH);

@@ -32,11 +32,7 @@ public class ChatClientCore {
     private Consumer<String> historyDoneListener;
     private BiConsumer<String, String> privateMessageListener;
 
-    /**
- * Establishes a TCP connection to the chat server.
- *
- * @return true if the connection was successfully established, false otherwise.
- */
+
 public boolean connect() {
         try {
             socket = new Socket(HOST, PORT);
@@ -50,14 +46,6 @@ public boolean connect() {
         }
     }
 
-    /**
- * Sends an authentication action (LOGIN or REGISTER) to the server and returns the result.
- *
- * @param action either "LOGIN" or "REGISTER"
- * @param user   the username
- * @param pass   the password
- * @return a string starting with "SUCCESS:" or "FAILED:" followed by the server's message
- */
 public String executeAuthAction(String action, String user, String pass) {
         try {
             out.println(action + "|" + user + "|" + pass);
@@ -88,10 +76,6 @@ public String executeAuthAction(String action, String user, String pass) {
         return "FAILED:Hệ thống phản hồi không hợp lệ.";
     }
 
-    /**
- * Starts a background thread that continuously reads messages from the server
- * and dispatches them to the appropriate registered listeners.
- */
 public void startListening() {
         new Thread(() -> {
             try {
@@ -164,12 +148,6 @@ public void startListening() {
         }).start();
     }
 
-    /**
- * Sends a private chat message or media to the specified user.
- *
- * @param toUser       the recipient username
- * @param formattedMsg message payload (plain text or prefixed with [IMAGE]:, [VIDEO]:, [FILE]:)
- */
 public void sendPrivateMessage(String toUser, String formattedMsg) {
         if (out == null || !isRunning) {
             System.err.println("[SOCKET CLIENT LỖI] Không thể gửi tin, kết nối chưa sẵn sàng.");
@@ -196,113 +174,41 @@ public void sendPrivateMessage(String toUser, String formattedMsg) {
         System.out.println("[SOCKET CLIENT -> SERVER] Đã đẩy gói tin gửi tới @" + toUser);
     }
 
-    /**
- * Registers a listener that receives the list of online users.
- *
- * @param listener consumer that receives a list of usernames.
- */
 public void addUserListListener(Consumer<List<String>> listener) {
         this.userListListener = listener;
         this.contactListListener = listener; // also set for UI alias
     }
 
-    /**
-     * Alias used by UI to receive online user list.
-     */
-    public void addContactListListener(Consumer<List<String>> listener) {
-        this.contactListListener = listener;
-    }
 
-    /**
-     * Register listener for contacts (users the current user has ever chatted with).
-     */
     public void addContactsListener(Consumer<List<String>> listener) {
         this.contactsListener = listener;
     }
 
-    /**
-     * Register listener for avatar updates (username, base64 image).
-     */
-    public void addAvatarListener(BiConsumer<String, String> listener) {
-        this.avatarListener = listener;
-    }
-
-    /**
- * Registers a listener for private messages received from other users.
- *
- * @param listener bi-consumer that receives (senderUsername, formattedMessage)
- */
 public void addPrivateMessageListener(BiConsumer<String, String> listener) {
         this.privateMessageListener = listener;
     }
 
-    /**
-     * Register listener for history messages (sender, formattedMsg).
-     */
+
     public void addHistoryMessageListener(BiConsumer<String, String> listener) {
         this.historyMessageListener = listener;
     }
 
-    /**
-     * Register listener that signals when the server finished sending history for a user.
-     */
+
     public void addHistoryDoneListener(Consumer<String> listener) {
         this.historyDoneListener = listener;
     }
-
-    /**
-     * Request the server to send chat history with the specified user.
-     */
-    /**
-     * Request chat history with default page size (30) starting from offset 0.
-     */
-    public void requestLoadHistory(String user) {
-        requestLoadHistory(user, 0, 1000);
-    }
-
-    /**
-     * Request chat history with pagination.
-     * @param user   The other participant username.
-     * @param offset Number of messages to skip (based on newest first ordering).
-     * @param limit  Maximum number of messages to retrieve.
-     */
     public void requestLoadHistory(String user, int offset, int limit) {
         if (out == null || !isRunning) return;
         out.println("GET_HISTORY|" + user + "|" + offset + "|" + limit);
         out.flush();
     }
 
-/**
- * Sends a request to update the user's avatar on the server.
- *
- * @param base64 base64‑encoded image data representing the avatar
- */
-    public void requestSetAvatar(String base64) {
-        if (out == null || !isRunning) return;
-        out.println("SET_AVATAR|" + base64);
-        out.flush();
-    }
-
-    /**
- * Requests the server to send the list of contacts (users the current user has ever chatted with).
- */
 public void requestContacts() {
         if (out == null || !isRunning) return;
         out.println("GET_CONTACTS");
         out.flush();
     }
 
-    /**
-     * Send a file (image, video, generic file) to a target user.
-     * Payload format: <fileName>|<Base64Data>
-     */
-    /**
- * Sends a file (image, video, or generic document) to the specified user.
- *
- * @param toUser the recipient username
- * @param file   the file to send
- * @param type   message type: IMAGE, VIDEO, or FILE
- */
 public void sendFileMessage(String toUser, File file, String type) {
         if (out == null || !isRunning) return;
         try {
@@ -316,31 +222,12 @@ public void sendFileMessage(String toUser, File file, String type) {
         }
     }
 
-    /**
-     * Send an emoji/icon message.
-     */
-    /**
- * Sends an emoji/icon message to a user.
- *
- * @param toUser the recipient username
- * @param icon   the unicode emoji or icon string
- */
 public void sendIconMessage(String toUser, String icon) {
         if (out == null || !isRunning) return;
         out.println("CHAT|" + toUser + "|ICON|" + icon);
         out.flush();
     }
 
-    /**
- * Returns the username of the logged‑in user (if any).
- */
-public String getUsername() {
-        return username;
-    }
-
-    /**
- * Closes the socket and associated streams, terminating the client connection.
- */
 public void close() {
         isRunning = false;
         try {
