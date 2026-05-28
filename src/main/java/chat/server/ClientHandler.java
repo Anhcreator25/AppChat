@@ -1,6 +1,8 @@
 package chat.server;
 
 import chat.shared.model.User;
+import chat.shared.Constants;
+import chat.server.BotReplyService;
 import chat.shared.model.ChatMessage;
 import chat.shared.util.PasswordHasher;
 import chat.server.db.HibernateUtil;
@@ -29,11 +31,8 @@ public class ClientHandler implements Runnable {
     }
 
     @Override
-    /**
- * Main execution loop: reads client requests, processes authentication,
- * then handles chat messages and history queries.
- */
-public void run() {
+
+    public void run() {
         try {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
             out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
@@ -86,6 +85,25 @@ public void run() {
                         }
                     } else if ("GET_CONTACTS".equals(cmd)) {
                         sendContactList();
+                    } else if ("DELETE_CHAT".equals(cmd) && parts.length >= 2) {
+                        String target = parts[1];
+                        Session delSession = HibernateUtil.getSessionFactory().openSession();
+                        Transaction delTx = null;
+                        try {
+                            delTx = delSession.beginTransaction();
+                            delSession.createQuery("delete from ChatMessage where (fromUser = :me and toUser = :t) or (fromUser = :t and toUser = :me)")
+                                    .setParameter("me", username)
+                                    .setParameter("t", target)
+                                    .executeUpdate();
+                            delTx.commit();
+                        } catch (Exception e) {
+                            if (delTx != null) delTx.rollback();
+                            System.err.println("[SERVER - DB] Lỗi xóa lịch sử: " + e.getMessage());
+                        } finally {
+                            delSession.close();
+                        }
+                        out.println("DELETE_CHAT_RESPONSE|SUCCESS|Đã xóa lịch sử với " + target);
+                        out.flush();
                     }
                 }
             }
@@ -97,13 +115,8 @@ public void run() {
         }
     }
 
-    /**
- * Handles a REGISTER request: creates a new user record if the username is not taken.
- *
- * @param user the requested username
- * @param pass the plaintext password (will be hashed before storing)
- */
-private void handleRegister(String user, String pass) {
+
+    private void handleRegister(String user, String pass) {
         Session session = HibernateUtil.getSessionFactory().openSession();
         Transaction tx = null;
         try {
@@ -130,14 +143,8 @@ private void handleRegister(String user, String pass) {
         }
     }
 
-    /**
- * Handles a LOGIN request: verifies credentials and checks if the user is already online.
- *
- * @param user the username
- * @param pass the plaintext password
- * @return true if login succeeds, false otherwise
- */
-private boolean handleLogin(String user, String pass) {
+
+    private boolean handleLogin(String user, String pass) {
         Session session = HibernateUtil.getSessionFactory().openSession();
         try {
             User dbUser = session.createQuery("from User where username = :u", User.class)
@@ -159,17 +166,11 @@ private boolean handleLogin(String user, String pass) {
         }
     }
 
-    /**
- * Persists a chat message to the database and forwards it to the intended recipient if they are online.
- *
- * @param toUser   recipient username
- * @param type     message type (TEXT, IMAGE, VIDEO, FILE)
- * @param payload  raw payload (for files: fileName|Base64Data)
- */
-private void handleChatMessage(String toUser, String type, String payload) {
+
+    private void handleChatMessage(String toUser, String type, String payload) {
+        // Persist the user's message first (common for all recipients)
         String dbContent = payload;
         String fileName = null;
-
         if (!"TEXT".equals(type)) {
             int sepIdx = payload.indexOf("|");
             if (sepIdx != -1) {
@@ -177,7 +178,6 @@ private void handleChatMessage(String toUser, String type, String payload) {
                 dbContent = payload.substring(sepIdx + 1);
             }
         }
-
         Session session = HibernateUtil.getSessionFactory().openSession();
         Transaction tx = null;
         try {
@@ -192,21 +192,74 @@ private void handleChatMessage(String toUser, String type, String payload) {
             session.close();
         }
 
+        // If the recipient is the shared bot, generate a reply locally
+        if (Constants.BOT_USERNAME.equals(toUser)) {
+            String botReply;
+            if ("TEXT".equals(type)) {
+                String contextPrompt = "";
+                Session historySession = HibernateUtil.getSessionFactory().openSession();
+                try {
+                    java.util.List<ChatMessage> history = historySession.createQuery(
+                                    "from ChatMessage where (fromUser = :u and toUser = :b) or (fromUser = :b and toUser = :u) order by id desc", ChatMessage.class)
+                            .setParameter("u", this.username)
+                            .setParameter("b", Constants.BOT_USERNAME)
+                            .setMaxResults(5)
+                            .getResultList();
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("Dưới đây là lịch sử cuộc trò chuyện, hãy dựa vào đó để trả lời câu hỏi cuối cùng:\n");
+                    for (int i = history.size() - 1; i >= 0; i--) {
+                        ChatMessage m = history.get(i);
+                        sb.append(m.getFromUser()).append(": ").append(m.getContent()).append("\n");
+                    }
+                    sb.append(this.username).append(": ").append(dbContent).append("\n");
+                    sb.append("Trợ lý AI: ");
+
+                    contextPrompt = sb.toString();
+                } catch (Exception ex) {
+                    System.err.println("[SERVER] Lỗi đọc bối cảnh lịch sử hội thoại: " + ex.getMessage());
+                    contextPrompt = dbContent;
+                } finally {
+                    historySession.close();
+                }
+
+                botReply = BotReplyService.getReply(contextPrompt);
+            } else {
+                botReply = "Bot đã nhận " + type.toLowerCase() + ".";
+            }
+
+            // Persist bot's reply (Lưu câu trả lời của AI vào Database)
+            Session botSession = HibernateUtil.getSessionFactory().openSession();
+            Transaction botTx = null;
+            try {
+                botTx = botSession.beginTransaction();
+                ChatMessage botMsg = new ChatMessage(Constants.BOT_USERNAME, this.username, botReply, "TEXT", null);
+                botSession.save(botMsg);
+                botTx.commit();
+            } catch (Exception e) {
+                if (botTx != null) botTx.rollback();
+                System.err.println("[SERVER - DATABASE LỖI] Không thể lưu tin bot: " + e.getMessage());
+            } finally {
+                botSession.close();
+            }
+
+            // Send bot reply back to the caller (Bắn tin nhắn về lại giao diện Client)
+            out.println("INCOMING_MSG|" + Constants.BOT_USERNAME + "|TEXT|" + botReply);
+            out.flush();
+            return;
+        }
+
+        // Normal forwarding to online user (if any)
         ClientHandler receiver = onlineUsers.get(toUser);
         if (receiver != null) {
             String outboundMsg = "INCOMING_MSG|" + this.username + "|" + type + "|" + payload;
             receiver.out.println(outboundMsg);
-            receiver.out.flush(); // Bắt buộc giải phóng đường ống Socket lập tức
+            receiver.out.flush();
             System.out.println("[SERVER -> SOCKET] Đã trung chuyển trực tiếp tới @" + toUser);
         }
     }
 
-    /**
-     * Send a page of chat history to the requesting client.
-     * Messages are ordered by timestamp DESC (newest first) and limited by offset/limit.
-     * Each message is sent as: HISTORY_MSG|sender|type|payload
-     * After all messages of the page are sent, a terminating marker is sent: HISTORY_DONE|otherUser
-     */
+
     private void handleHistoryRequest(String otherUser, int offset, int limit) {
         Session session = HibernateUtil.getSessionFactory().openSession();
         try {
@@ -223,7 +276,6 @@ private void handleChatMessage(String toUser, String type, String payload) {
                 if ("TEXT".equals(type)) {
                     payload = msg.getContent();
                 } else {
-                    // payload format: fileName|Base64Data
                     payload = (msg.getFileName() != null ? msg.getFileName() : "") + "|" + msg.getContent();
                 }
                 String outStr = "HISTORY_MSG|" + msg.getFromUser() + "|" + type + "|" + payload;
@@ -240,9 +292,7 @@ private void handleChatMessage(String toUser, String type, String payload) {
         out.flush();
     }
 
-    /**
-     * Send the full contacts list to the client (users ever chatted with).
-     */
+
     private void sendContactList() {
         Session session = HibernateUtil.getSessionFactory().openSession();
         try {
@@ -257,10 +307,8 @@ private void handleChatMessage(String toUser, String type, String payload) {
         }
     }
 
-    /**
- * Sends the current online user list to all connected clients.
- */
-private void broadcastUserList() {
+
+    private void broadcastUserList() {
         String listStr = "USER_LIST|" + String.join(",", onlineUsers.keySet());
         for (ClientHandler handler : onlineUsers.values()) {
             handler.out.println(listStr);
@@ -268,10 +316,8 @@ private void broadcastUserList() {
         }
     }
 
-    /**
- * Closes the client socket and removes the user from the online list.
- */
-private void closeConnection() {
+
+    private void closeConnection() {
         if (username != null) {
             onlineUsers.remove(username);
             broadcastUserList();

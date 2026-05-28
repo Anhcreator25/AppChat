@@ -12,27 +12,20 @@ public class HibernateUtil {
 
     private static SessionFactory buildSessionFactory() {
         try {
-            // Tự động tìm và nạp cấu hình từ file src/main/resources/hibernate.cfg.xml
             return new Configuration().configure().buildSessionFactory();
-        } catch (Throwable ex) {
+        }
+        catch (Throwable ex) {
             System.err.println("[HIBERNATE UTIL - LỖI NGUY HIỂM] Khởi tạo SessionFactory thất bại!");
             System.err.println("Chi tiết lỗi: " + ex.getMessage());
-            // In toàn bộ cây lỗi ra để dễ dàng debug nếu sai cấu hình hoặc MySQL chưa bật
             ex.printStackTrace();
             throw new ExceptionInInitializerError(ex);
         }
     }
 
-    /**
-     * Lấy về SessionFactory duy nhất để mở kết nối truy vấn (Session)
-     */
     public static SessionFactory getSessionFactory() {
         return sessionFactory;
     }
 
-    /**
-     * Đóng kết nối an toàn giải phóng bộ nhớ RAM và Socket của MySQL khi tắt Server
-     */
     public static void shutdown() {
         if (sessionFactory != null && !sessionFactory.isClosed()) {
             getSessionFactory().close();

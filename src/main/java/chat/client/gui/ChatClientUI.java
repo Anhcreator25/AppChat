@@ -1,7 +1,8 @@
 package chat.client.gui;
 
 import chat.client.network.ChatClientCore;
-import chat.client.network.ChatbotService;
+import chat.shared.Constants;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -23,7 +24,7 @@ import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
 import javax.swing.Timer;
-import chat.client.util.BotHistoryManager;
+
 
 public class ChatClientUI extends JFrame {
     private final String myUsername;
@@ -49,9 +50,9 @@ public class ChatClientUI extends JFrame {
     private JButton btnSend;
     private JButton btnAttach;
     private JButton btnEmoji;
-private JButton btnClearHistory;
-private static final String BOT_NAME = "Gemini Bot";
-private static final String BOT_ICON = "🤖";
+    private JButton btnClearHistory;
+
+
 
     // --- BẢNG MÀU MESSENGER PREMIUM ---
     private static final Color PRIMARY_BLUE = new Color(0, 132, 255);
@@ -76,7 +77,7 @@ private static final String BOT_ICON = "🤖";
         String lastMessage;
         String timeAgo;
         boolean isOnline;
-        String icon; // optional Unicode icon (e.g., 🤖) or null for default avatar
+        String icon;
 
         public ContactItem(String username, String lastMessage, String timeAgo, boolean isOnline) {
             this(username, lastMessage, timeAgo, isOnline, null);
@@ -180,9 +181,9 @@ private static final String BOT_ICON = "🤖";
         onlineJList.setBackground(BACKGROUND_LEFT);
         onlineJList.setSelectionBackground(new Color(242, 244, 247));
         onlineJList.setSelectionForeground(TEXT_MAIN);
-        // Add Gemini Bot as the first contact
-        ContactItem botItem = new ContactItem(BOT_NAME, "Nhấp để trò chuyện với AI", "1 phút", true, BOT_ICON);
-        contactsMap.put(BOT_NAME, botItem);
+        // Add shared Gemini Bot as the first contact
+        ContactItem botItem = new ContactItem(Constants.BOT_USERNAME, "Nhấp để trò chuyện với AI", "1 phút", true, Constants.BOT_ICON);
+        contactsMap.put(Constants.BOT_USERNAME, botItem);
         onlineListModel.addElement(botItem);
 
         onlineJList.setCellRenderer(new ListCellRenderer<ContactItem>() {
@@ -258,29 +259,13 @@ private static final String BOT_ICON = "🤖";
                     chatBoxContainer.revalidate();
                     chatBoxContainer.repaint();
 
-                    if (BOT_NAME.equals(currentSelectedUser)) {
-                        // Load bot history from file
-                        List<String> lines = BotHistoryManager.load();
-                        for (String line : lines) {
-                            int sep = line.indexOf('|');
-                            if (sep > 0) {
-                                String role = line.substring(0, sep);
-                                String content = line.substring(sep + 1);
-                                boolean isMe = "USER".equals(role);
-                                appendChatBubble(content, isMe);
-                            }
-                        }
-                        // Show clear button
-                        btnClearHistory.setVisible(true);
-                    } else {
-                        // Normal user: hide clear button and request history
-                        btnClearHistory.setVisible(false);
-                        historyOffset = 0;
-                        receivedHistoryCount = 0;
-                        allHistoryLoaded = false;
-                        loadingHistory = true;
-                        core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
-                    }
+                    // Request chat history for the selected user (including bot)
+                    historyOffset = 0;
+                    receivedHistoryCount = 0;
+                    allHistoryLoaded = false;
+                    loadingHistory = true;
+                    core.requestLoadHistory(currentSelectedUser, historyOffset, PAGE_SIZE);
+                    btnClearHistory.setVisible(true);
                 }
             }
         });
@@ -309,10 +294,12 @@ private static final String BOT_ICON = "🤖";
         btnClearHistory = createStyledToolbarButton("🗑");
         btnClearHistory.setToolTipText("Xóa lịch sử bot");
         btnClearHistory.addActionListener(e -> {
-            BotHistoryManager.clear();
-            chatBoxContainer.removeAll();
-            chatBoxContainer.revalidate();
-            chatBoxContainer.repaint();
+            if (currentSelectedUser != null) {
+                core.deleteChat(currentSelectedUser);
+                chatBoxContainer.removeAll();
+                chatBoxContainer.revalidate();
+                chatBoxContainer.repaint();
+            }
         });
         btnClearHistory.setVisible(false);
         rightHeader.add(btnClearHistory, BorderLayout.EAST);
@@ -496,12 +483,7 @@ private static final String BOT_ICON = "🤖";
         return btn;
     }
 
-    /**
- * Sends a text message entered in the input area to the currently selected chat partner.
- * Validates that the message is not empty and that a contact is selected.
- * After sending, the message bubble is added to the UI and the input field is cleared.
- */
-private void performSendMessage() {
+    private void performSendMessage() {
         String msg = txtInput.getText().trim();
         if (msg.isEmpty()) return;
 
@@ -510,67 +492,14 @@ private void performSendMessage() {
             return;
         }
 
-        if (BOT_NAME.equals(currentSelectedUser)) {
-            // User message to bot
-            appendChatBubble(msg, true);
-            txtInput.setText("");
-            txtInput.requestFocus();
-
-            // Add typing bubble
-            JComponent typingBubble = createTypingBubble();
-            chatBoxContainer.add(typingBubble);
-            chatBoxContainer.revalidate();
-            chatBoxContainer.repaint();
-
-            // Save user message to history
-            BotHistoryManager.appendUser(msg);
-
-            // Call Gemini API in background
-            SwingWorker<String, Void> worker = new SwingWorker<String, Void>() {
-                @Override
-                protected String doInBackground() throws Exception {
-                    return ChatbotService.ask(msg);
-                }
-
-                @Override
-                protected void done() {
-                    chatBoxContainer.remove(typingBubble);
-                    try {
-                        String reply = get();
-                        if (reply == null) reply = "";
-                        if (reply.startsWith("Lỗi:") || reply.startsWith("Google AI trả về mã lỗi")) {
-                            appendErrorBubble(reply, false);
-                            JOptionPane.showMessageDialog(ChatClientUI.this, reply, "Lỗi Bot", JOptionPane.ERROR_MESSAGE);
-                        } else {
-                            appendChatBubble(reply, false);
-                            BotHistoryManager.appendBot(reply);
-                        }
-                    } catch (Exception ex) {
-                        String err = "Lỗi kết nối Chatbot: " + ex.getMessage();
-                        appendErrorBubble(err, false);
-                        JOptionPane.showMessageDialog(ChatClientUI.this, err, "Lỗi Bot", JOptionPane.ERROR_MESSAGE);
-                    }
-                    chatBoxContainer.revalidate();
-                    chatBoxContainer.repaint();
-                }
-            };
-            worker.execute();
-        } else {
-            // Normal user flow
+        // Send message to server (bot or user)
             core.sendPrivateMessage(currentSelectedUser, msg);
             appendChatBubble(msg, true);
-
             txtInput.setText("");
             txtInput.requestFocus();
-        }
     }
 
-    /**
- * Handles the attachment of a file (image, video, or generic file) to the current chat.
- * Opens a file chooser, determines the file type, reads the file bytes,
- * sends it through the core, and displays an appropriate bubble (image or file).
- */
-private void handleFileAttach() {
+    private void handleFileAttach() {
         if (currentSelectedUser == null) {
             JOptionPane.showMessageDialog(this, "Vui lòng chọn một người để gửi tệp!");
             return;
@@ -606,10 +535,6 @@ if ("IMAGE".equals(type)) {
         }
     }
 
-    /**
- * Opens a dialog to let the user select an emoji from a predefined list.
- * The chosen emoji is sent as an icon message and displayed as a text bubble.
- */
     private void handleEmojiSelect() {
         // 1. Kiểm tra xem đã chọn người chat chưa
         if (currentSelectedUser == null) {
@@ -658,15 +583,7 @@ if ("IMAGE".equals(type)) {
         emojiMenu.show(btnEmoji, 0, -popupHeight);
     }
 
-    /**
- * Registers all network listeners with {@link ChatClientCore}.
- *   • contactsListener – populates the contacts map with users the current user has chatted with.
- *   • userListListener – updates online/offline status for contacts and adds newly online users.
- *   • privateMessageListener – receives private messages and forwards them to UI.
- *   • historyMessageListener – receives historical messages for pagination.
- *   • historyDoneListener – marks the end of a page of history.
- */
-private void setupNetworkListeners() {
+    private void setupNetworkListeners() {
         core.addContactsListener(users -> SwingUtilities.invokeLater(() -> {
             for (String user : users) {
                 if (!user.equals(myUsername) && !contactsMap.containsKey(user)) {
@@ -727,13 +644,7 @@ private void setupNetworkListeners() {
         }));
     }
 
-    /**
- * Parses a formatted message received from the server and routes it to the appropriate UI bubble.
- * Supported prefixes: [IMAGE]:, [FILE]:, [VIDEO]:. Other messages are treated as plain text.
- * @param formattedMsg The message payload from the server.
- * @param isMe         True if the message originates from the current user.
- */
-private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) {
+    private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) {
         if (formattedMsg.startsWith("[IMAGE]:")) {
             String payload = formattedMsg.substring("[IMAGE]:".length());
             int sepIdx = payload.indexOf('|');
@@ -765,15 +676,7 @@ private void processIncomingFormattedMessage(String formattedMsg, boolean isMe) 
         }
     }
 
-
-    /**
- * Creates and adds a text chat bubble to the conversation view.
- * The bubble width is limited to a maximum of 3 cm (converted to pixels).
- * The height is automatically calculated based on the wrapped text.
- * @param text The message text to display.
- * @param isMe True if the message was sent by the current user.
- */
-private void appendChatBubble(String text, boolean isMe) {
+    private void appendChatBubble(String text, boolean isMe) {
         Box row = Box.createHorizontalBox();
 
         JTextArea bubbleArea = new JTextArea(text);
@@ -922,8 +825,7 @@ private void appendChatBubble(String text, boolean isMe) {
         appendImageBubble(emojiIcon, isMe);
     }
 
-
-private JComponent createTypingBubble() {
+    private JComponent createTypingBubble() {
         JPanel bubble = new JPanel(new BorderLayout()) {
             private boolean visible = true;
             {

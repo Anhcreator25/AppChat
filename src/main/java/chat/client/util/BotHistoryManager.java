@@ -22,7 +22,6 @@ public class BotHistoryManager {
             }
             return Files.readAllLines(HISTORY_PATH);
         } catch (IOException e) {
-            // On error return empty history – UI will simply show nothing
             return new ArrayList<>();
         }
     }
@@ -40,7 +39,6 @@ public class BotHistoryManager {
             Files.writeString(HISTORY_PATH, line + System.lineSeparator(),
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException ignored) {
-            // Silently ignore – UI will still work but history won't be persisted
         }
     }
 

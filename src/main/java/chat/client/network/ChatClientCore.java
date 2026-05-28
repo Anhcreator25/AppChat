@@ -113,6 +113,13 @@ public void startListening() {
                 String fromUser = tokens[1];
                 String type = tokens[2];
                 String payload = tokens[3];
+                // Decode escaped characters sent by the server
+                payload = payload.replace("\\n", "\n")
+                                 .replace("\\r", "\r")
+                                 .replace("\\t", "\t")
+                                 .replace("\\\"", "\"")
+                                 .replace("\\\\", "\\")
+                                 .replace("%7C", "|");
 
                 String formattedUiMessage;
                 if ("TEXT".equals(type)) {
@@ -200,6 +207,15 @@ public void addPrivateMessageListener(BiConsumer<String, String> listener) {
     public void requestLoadHistory(String user, int offset, int limit) {
         if (out == null || !isRunning) return;
         out.println("GET_HISTORY|" + user + "|" + offset + "|" + limit);
+        out.flush();
+    }
+
+    /**
+     * Sends a request to delete the entire chat history with the specified user.
+     */
+    public void deleteChat(String user) {
+        if (out == null || !isRunning) return;
+        out.println("DELETE_CHAT|" + user);
         out.flush();
     }
 

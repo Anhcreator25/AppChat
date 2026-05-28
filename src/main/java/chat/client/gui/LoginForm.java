@@ -19,7 +19,7 @@ public class LoginForm extends JFrame {
     private JCheckBox showPassword;
     private final ChatClientCore core;
 
-    // --- BẢNG MÀU UI PREMIUM ---
+
     private static final Color PRIMARY_BLUE = new Color(0, 132, 255);
     private static final Color HOVER_BLUE = new Color(0, 110, 220);
     private static final Color BG_GRADIENT_START = new Color(242, 246, 255);
@@ -31,13 +31,13 @@ public class LoginForm extends JFrame {
         core = new ChatClientCore();
         if (!core.connect()) {
             JOptionPane.showMessageDialog(this,
-                    "Không thể kết nối đến Máy chủ Chat Tèo Coffee! Vui lòng kiểm tra lại Server.",
+                    "Không thể kết nối đến Máy chủ ! Vui lòng kiểm tra lại Server.",
                     "Lỗi Mạng Socket", JOptionPane.ERROR_MESSAGE);
             System.exit(0);
         }
 
         setTitle("Messenger - Đăng Nhập");
-        setSize(460, 540); // Kích thước khung chuẩn hiện đại
+        setSize(460, 540);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
@@ -47,7 +47,7 @@ public class LoginForm extends JFrame {
     }
 
     private JPanel createLoginPanel() {
-        // Nền chính sử dụng Gradient mượt mà
+
         JPanel mainPanel = new JPanel(new GridBagLayout()) {
             @Override
             protected void paintComponent(Graphics g) {
@@ -124,7 +124,7 @@ public class LoginForm extends JFrame {
         txtUser = new JTextField();
         txtUser.setFont(inputFont);
         txtUser.putClientProperty("JTextField.placeholderText", "Nhập tên tài khoản...");
-        txtUser.putClientProperty("JComponent.roundRect", true); // Bo tròn chuẩn FlatLaf
+        txtUser.putClientProperty("JComponent.roundRect", true); //
         txtUser.setPreferredSize(new Dimension(310, 38));
         card.add(txtUser, gbc);
 
@@ -142,7 +142,7 @@ public class LoginForm extends JFrame {
         txtPass = new JPasswordField();
         txtPass.setFont(inputFont);
         txtPass.putClientProperty("JTextField.placeholderText", "Nhập mật khẩu...");
-        txtPass.putClientProperty("JComponent.roundRect", true); // Bo tròn chuẩn FlatLaf
+        txtPass.putClientProperty("JComponent.roundRect", true);
         txtPass.setPreferredSize(new Dimension(310, 38));
         card.add(txtPass, gbc);
 
@@ -234,13 +234,10 @@ public class LoginForm extends JFrame {
         btnLogin.setBackground(TEXT_MUTED);
 
         String response = core.executeAuthAction("LOGIN", name, pass);
-
         if (response.startsWith("SUCCESS")) {
             JOptionPane.showMessageDialog(this, "Đăng nhập thành công!", "Thành công", JOptionPane.INFORMATION_MESSAGE);
-
             ChatClientUI chatUI = new ChatClientUI(name, core);
             chatUI.setVisible(true);
-
             core.startListening();
             this.dispose();
         } else {
